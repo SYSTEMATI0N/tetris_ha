@@ -246,6 +246,8 @@ async def run():
     loop.add_signal_handler(signal.SIGINT, signal_handler)
 
     async with BleakClient(DEVICE_ADDRESS) as client:
+        await client.get_services()  # 🔧 ключевая строка
+
         if not client.is_connected:
             print("❌ Не удалось подключиться.")
             return
@@ -254,6 +256,7 @@ async def run():
         await game_loop(client)
 
     print("🛑 Отключено от устройства.")
+
 
 if __name__ == '__main__':
     asyncio.run(run())
