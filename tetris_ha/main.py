@@ -2,6 +2,7 @@ import asyncio
 from aiohttp import web
 from bleak import BleakClient
 import random
+import copy
 
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
@@ -144,95 +145,145 @@ class TetrisGame:
     def __init__(self, cols_start, cols_count):
         self.cols_start = cols_start
         self.cols_count = cols_count
-        self.field = [[False]*cols_count for _ in range(ROWS)]
+        self.field = [[False] * cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(cols_count)] for _ in range(ROWS)]
-        self.current_piece = None
-        self.piece_row = -2
-        self.piece_col = cols_count // 2 - 1
-        self.piece_blocks = []
-        self.piece_color = COLOR_PALETTE[0]
-        self.game_over = False
-        self.locked_pieces_count = 0
         self.spawn_new_piece()
 
     def spawn_new_piece(self):
         self.current_piece = random.choice(list(TETROMINOS.keys()))
-        self.piece_blocks = TETROMINOS[self.current_piece]
+        self.piece_blocks = copy.deepcopy(TETROMINOS[self.current_piece])
         self.piece_row = -2
         self.piece_col = self.cols_count // 2 - 2
         self.piece_color = random.choice(COLOR_PALETTE)
+        self.game_over = self._check_spawn_collision()
+        self.locked_pieces_count = getattr(self, 'locked_pieces_count', 0)
+
+    def _check_spawn_collision(self):
         for r, c in self.piece_blocks:
-            nr = self.piece_row + r
-            nc = self.piece_col + c
+            nr, nc = self.piece_row + r, self.piece_col + c
             if 0 <= nr < ROWS and self.field[nr][nc]:
-                self.game_over = True
-                print(f"💀 Game Over на поле начиная с колонки {self.cols_start}! Перезапуск...")
-                self.reset_game()
-                break
+                return True
+        return False
 
     def reset_game(self):
-        self.field = [[False]*self.cols_count for _ in range(ROWS)]
+        self.field = [[False] * self.cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(self.cols_count)] for _ in range(ROWS)]
-        self.game_over = False
         self.locked_pieces_count = 0
         self.spawn_new_piece()
+        self.game_over = False
 
-    def can_move(self, dr, dc):
-        for r, c in self.piece_blocks:
-            nr = self.piece_row + r + dr
-            nc = self.piece_col + c + dc
-            if nr >= ROWS or nc < 0 or nc >= self.cols_count:
+    def can_place(self, blocks, row, col, field=None):
+        fld = field or self.field
+        for r, c in blocks:
+            nr, nc = row + r, col + c
+            if nr >= ROWS or nc < 0 or nc >= self.cols_count or nr < 0:
                 return False
-            if nr >= 0 and self.field[nr][nc]:
-                return False
-            if nr < -2:
+            if fld[nr][nc]:
                 return False
         return True
 
-    def lock_piece(self):
-        for r, c in self.piece_blocks:
-            nr = self.piece_row + r
-            nc = self.piece_col + c
-            if 0 <= nr < ROWS and 0 <= nc < self.cols_count:
-                self.field[nr][nc] = True
-                self.color_field[nr][nc] = self.piece_color
-        self.locked_pieces_count += 1
-        self.clear_lines()
-        self.spawn_new_piece()
+    def place(self, blocks, row, col, field, color_field=None, color=None):
+        cf = color_field or self.color_field
+        for r, c in blocks:
+            nr, nc = row + r, col + c
+            if 0 <= nr < ROWS:
+                field[nr][nc] = True
+                if color is not None:
+                    cf[nr][nc] = color
 
     def clear_lines(self):
-        new_field = []
-        new_color_field = []
-        lines_cleared = 0
-        for row_idx in range(ROWS):
-            if all(self.field[row_idx]):
-                lines_cleared += 1
-            else:
-                new_field.append(self.field[row_idx])
-                new_color_field.append(self.color_field[row_idx])
+        new_f, new_cf = [], []
+        for r in range(ROWS):
+            if all(self.field[r]):
+                continue
+            new_f.append(self.field[r])
+            new_cf.append(self.color_field[r])
+        lines_cleared = ROWS - len(new_f)
         for _ in range(lines_cleared):
-            new_field.insert(0, [False]*self.cols_count)
-            new_color_field.insert(0, [COLOR_BLACK]*self.cols_count)
-        self.field = new_field
-        self.color_field = new_color_field
+            new_f.insert(0, [False] * self.cols_count)
+            new_cf.insert(0, [COLOR_BLACK] * self.cols_count)
+        self.field, self.color_field = new_f, new_cf
+        return lines_cleared
 
-    def rotate_piece(self):
-        if self.current_piece == 'O':
-            return
-        new_blocks = [(-c, r) for r, c in self.piece_blocks]
-        for r, c in new_blocks:
-            nr = self.piece_row + r
-            nc = self.piece_col + c
-            if nr < -2 or nr >= ROWS or nc < 0 or nc >= self.cols_count:
-                return
-            if nr >= 0 and self.field[nr][nc]:
-                return
-        self.piece_blocks = new_blocks
+    def get_rotations(self, blocks):
+        rotations = []
+        current = blocks
+        for _ in range(4):
+            # Поворачиваем
+            current = [(-c, r) for r, c in current]
+            # Нормализуем положение (минимум 0)
+            min_r = min(r for r, c in current)
+            min_c = min(c for r, c in current)
+            norm = sorted([(r - min_r, c - min_c) for r, c in current])
+            if norm not in rotations:
+                rotations.append(norm)
+        return rotations
+
+    def count_holes(self, field):
+        holes = 0
+        for c in range(self.cols_count):
+            block_found = False
+            for r in range(ROWS):
+                if field[r][c]:
+                    block_found = True
+                elif block_found and not field[r][c]:
+                    holes += 1
+        return holes
+
+    def column_heights(self, field):
+        heights = []
+        for c in range(self.cols_count):
+            h = 0
+            for r in range(ROWS):
+                if field[r][c]:
+                    h = ROWS - r
+                    break
+            heights.append(h)
+        return heights
+
+    def evaluate(self, field):
+        heights = self.column_heights(field)
+        max_height = max(heights)
+        holes = self.count_holes(field)
+        center = self.cols_count // 2
+        # Оценка удаление от центра - среднее отклонение
+        dev = sum(abs(c - center) for c in range(self.cols_count) if heights[c] > 0)
+        score = -max_height * 10 - holes * 5 - dev * 1
+        return score
+
+    def find_best_move(self):
+        best_score = -float('inf')
+        best_rot, best_col = None, None
+        rotations = self.get_rotations(self.piece_blocks)
+        for rot in rotations:
+            w = max(c for _, c in rot) + 1
+            for col in range(self.cols_count - w + 1):
+                # Найти, куда упадет
+                row = -max(r for r, _ in rot)
+                while self.can_place(rot, row + 1, col):
+                    row += 1
+                # Моделируем поле
+                temp_field = copy.deepcopy(self.field)
+                self.place(rot, row, col, temp_field)
+                score = self.evaluate(temp_field)
+                if score > best_score:
+                    best_score = score
+                    best_rot, best_col = rot, col
+        return best_rot, best_col
 
     def update(self):
         if self.game_over:
             return
-
+        # Находим лучший ход
+        rot, col = self.find_best_move()
+        # Применяем поворот
+        self.piece_blocks = rot
+        self.piece_col = col
+        # Опускаем донизу
+        while self.can_place(self.piece_blocks, self.piece_row + 1, self.piece_col):
+            self.piece_row += 1
+        # Блокируем
+        self.lock_piece()
         left_fill = self.column_fill(self.piece_col - 1) if self.piece_col > 0 else 1000
         right_fill = self.column_fill(self.piece_col + max(c for _, c in self.piece_blocks) + 1) if (self.piece_col + max(c for _, c in self.piece_blocks) + 1) < self.cols_count else 1000
 
