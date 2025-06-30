@@ -1,19 +1,34 @@
 import asyncio
 import random
-import signal
-from aiomqtt import Client as MqttClient, MqttError
+from aiohttp import web
 from bleak import BleakClient
 
-# Constants
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
-MQTT_BROKER = "localhost"
-MQTT_TOPIC = "led_curtain/mode"
+
 ROWS, COLS = 20, 20
 HALF_COLS = COLS // 2
 FPS = 4
 
-# Command mappings
+stop_event = asyncio.Event()
+
+COLOR_PALETTE = [
+    (20, 0, 80),
+    (56, 0, 145),
+    (57, 0, 98),
+    (108, 0, 142),
+    (180, 0, 82),
+    (95, 24, 13),
+]
+
+COLOR_BLACK = (0, 0, 0)
+
+INIT_CMDS = [
+    bytearray.fromhex("7e075100ffffff00ef"),
+    bytearray.fromhex("7e07580000ffff00ef"),
+    bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
+]
+
 CMD_MAP = {
     "Вкл": bytearray.fromhex("7e0704ff00010201ef"),
     "Выкл": bytearray.fromhex("7e07040000000201ef"),
@@ -27,41 +42,42 @@ CMD_MAP = {
     "Розовый": bytearray.fromhex("7e070503ff008010ef"),
 }
 
-COLOR_PALETTE = [
-    (20, 0, 80),
-    (56, 0, 145),
-    (57, 0, 98),
-    (108, 0, 142),
-    (180, 0, 82),
-    (95, 24, 13),
-]
-COLOR_BLACK = (0, 0, 0)
+def rgb_to_hex_str(rgb):
+    return ''.join(f"{c:02x}" for c in rgb)
 
-INIT_CMDS = [
-    bytearray.fromhex("7e075100ffffff00ef"),
-    bytearray.fromhex("7e07580000ffff00ef"),
-    bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
-]
+def build_command_from_pixels(pixels):
+    commands = []
+    i = 0
+    while i < len(pixels):
+        chunk = pixels[i:i+10]
+        body = ""
+        for row, col, color in chunk:
+            body += f"{row:02x}{col:02x}{rgb_to_hex_str(color)}"
+        for _ in range(10 - len(chunk)):
+            body += "ffffffffff"
+        cmd = bytearray.fromhex("7e0764" + body + "ef")
+        commands.append(cmd)
+        i += 10
+    return commands
 
-TETROMINOS = {
-    'I': [(0,0), (1,0), (2,0), (3,0)],
-    'O': [(0,0), (0,1), (1,0), (1,1)],
-    'T': [(0,1), (1,0), (1,1), (1,2)],
-    'S': [(0,1), (0,2), (1,0), (1,1)],
-    'Z': [(0,0), (0,1), (1,1), (1,2)],
-    'J': [(0,0), (1,0), (2,0), (2,1)],
-    'L': [(0,1), (1,1), (2,0), (2,1)],
-}
+async def send_commands(client, commands):
+    for cmd in commands:
+        print(f"📦 Отправка BLE пакета: {cmd.hex()}")
+        await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
-# Global stop event
-stop_event = asyncio.Event()
+async def send_control_command(client, cmd):
+    print(f"Отправка команды: {cmd.hex()}")
+    await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
-# Signal handler
-def signal_handler():
-    print("⚠️ Получен SIGTERM/SIGINT — остановка...")
-    stop_event.set()
+async def enter_per_led_mode(client):
+    for cmd in INIT_CMDS:
+        await send_commands(client, [cmd])
+        await asyncio.sleep(0.05)
 
-# Tetris Game Class
+# --- TetrisGame класс 
+# ... вставь сюда класс TetrisGame из твоего кода ...
+
+
 class TetrisGame:
     def __init__(self, cols_start, cols_count):
         self.cols_start = cols_start
@@ -190,83 +206,18 @@ class TetrisGame:
             nc = self.piece_col + c + self.cols_start + 1
             if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
                 led_matrix[nr][nc] = self.piece_color
+# -----------------------
 
-# Utility Functions
-def rgb_to_hex_str(rgb):
-    return ''.join(f"{c:02x}" for c in rgb)
-
-def build_command_from_pixels(pixels):
-    commands = []
-    i = 0
-    while i < len(pixels):
-        chunk = pixels[i:i+10]
-        body = ""
-        for row, col, color in chunk:
-            body += f"{row:02x}{col:02x}{rgb_to_hex_str(color)}"
-        for _ in range(10 - len(chunk)):
-            body += "ffffffffff"
-        cmd = bytearray.fromhex("7e0764" + body + "ef")
-        commands.append(cmd)
-        i += 10
-    return commands
-
-async def send_commands(client, commands):
-    for cmd in commands:
-        print(f"📦 Отправка BLE пакета: {cmd.hex()}")
-        await client.write_gatt_char(CHAR_UUID, cmd, response=False)
-
-async def send_control_command(client, cmd):
-    print(f"Отправка команды: {cmd.hex()}")
-    await client.write_gatt_char(CHAR_UUID, cmd, response=False)
-
-async def enter_per_led_mode(client):
-    for cmd in INIT_CMDS:
-        await send_commands(client, [cmd])
-        await asyncio.sleep(0.05)
-
-# Global game task
+# Game loop и управление задачей игры
 game_task = None
 
-# MQTT Handler
-async def mqtt_handler(client_ble):
-    global game_task
-    try:
-        async with MqttClient(MQTT_BROKER) as client_mqtt:
-            async with client_mqtt.unfiltered_messages() as messages:
-                await client_mqtt.subscribe(MQTT_TOPIC)
-                async for message in messages:
-                    if stop_event.is_set():
-                        break
-                    mode = message.payload.decode('utf-8')
-                    print(f"MQTT: получена команда: {mode}")
-                    if mode == "Тетрис":
-                        if game_task is None or game_task.done():
-                            game_task = asyncio.create_task(game_loop(client_ble))
-                        else:
-                            print("Игра уже запущена")
-                    else:
-                        if game_task is not None and not game_task.done():
-                            game_task.cancel()
-                            try:
-                                await game_task
-                            except asyncio.CancelledError:
-                                pass
-                            game_task = None
-                        if mode in CMD_MAP:
-                            await send_control_command(client_ble, CMD_MAP[mode])
-                        else:
-                            print(f"Неизвестная команда MQTT: {mode}")
-    except MqttError as error:
-        print(f"Ошибка MQTT: {error}")
+async def game_loop(client):
+    game1 = TetrisGame(0, HALF_COLS)
+    game2 = None
+    led_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
+    prev_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
 
-# Game Loop
-async def game_loop(client_ble):
     try:
-        await enter_per_led_mode(client_ble)
-        game1 = TetrisGame(0, HALF_COLS)
-        game2 = None
-        led_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
-        prev_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
         while not stop_event.is_set():
             game1.update()
             if game2 is None and game1.locked_pieces_count >= 10:
@@ -290,38 +241,72 @@ async def game_loop(client_ble):
             prev_matrix = [row[:] for row in led_matrix]
             if changed:
                 commands = build_command_from_pixels(changed)
-                await send_commands(client_ble, commands)
+                await send_commands(client, commands)
             await asyncio.sleep(1 / FPS)
     except asyncio.CancelledError:
         print("Игра остановлена")
 
-# Main Run Function
-async def run():
-    loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
+# Обработчик HTTP-запроса
+async def handle_mode(request):
+    global game_task
+    cmd = request.rel_url.query.get("cmd")
+    if cmd is None:
+        return web.Response(text="Параметр cmd обязателен", status=400)
+    cmd = cmd.strip()
+    print(f"HTTP: получена команда: {cmd}")
 
-    async with BleakClient(DEVICE_ADDRESS) as client_ble:
-        if not client_ble.is_connected:
+    client = request.app['ble_client']
+
+    # Обработка команды
+    if cmd == "Тетрис":
+        if game_task is None or game_task.done():
+            game_task = asyncio.create_task(game_loop(client))
+            return web.Response(text="Игра Тетрис запущена")
+        else:
+            return web.Response(text="Игра уже запущена")
+    elif cmd == "Стоп":
+        if game_task and not game_task.done():
+            game_task.cancel()
+            try:
+                await game_task
+            except asyncio.CancelledError:
+                pass
+            game_task = None
+            return web.Response(text="Игра остановлена")
+        else:
+            return web.Response(text="Игра не запущена")
+    elif cmd in CMD_MAP:
+        if game_task and not game_task.done():
+            game_task.cancel()
+            try:
+                await game_task
+            except asyncio.CancelledError:
+                pass
+            game_task = None
+        await send_control_command(client, CMD_MAP[cmd])
+        return web.Response(text=f"Команда {cmd} отправлена")
+    else:
+        return web.Response(text=f"Неизвестная команда: {cmd}", status=400)
+
+async def start_app(client):
+    app = web.Application()
+    app['ble_client'] = client
+    app.add_routes([web.get('/mode', handle_mode)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    print("🚀 HTTP сервер запущен на http://0.0.0.0:8080")
+
+async def main():
+    async with BleakClient(DEVICE_ADDRESS) as client:
+        if not client.is_connected:
             print("❌ Не удалось подключиться к BLE устройству.")
             return
         print("✅ Подключено к BLE.")
-        mqtt_task = asyncio.create_task(mqtt_handler(client_ble))
-        try:
-            await asyncio.gather(mqtt_task, return_exceptions=True)
-        except asyncio.CancelledError:
-            pass
-        finally:
-            if game_task is not None and not game_task.done():
-                game_task.cancel()
-                try:
-                    await game_task
-                except asyncio.CancelledError:
-                    pass
-        print("🛑 Отключено от устройства.")
+        await enter_per_led_mode(client)
+        await start_app(client)
+        await asyncio.Event().wait()  # Ждем вечности, пока не убьют процесс
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(run())
-    except KeyboardInterrupt:
-        print("Программа остановлена пользователем")
+if __name__ == '__main__':
+    asyncio.run(main())
