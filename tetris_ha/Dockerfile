@@ -5,7 +5,7 @@ ENV LANG C.UTF-8
 ENV PATH="/venv/bin:${PATH}"
 
 # 1) Системные библиотеки
-# 2) Создание venv и установка bleak
+# 2) Создание venv и установка bleak + asyncio-mqtt
 RUN apk add --no-cache \
       python3 \
       py3-pip \
@@ -18,7 +18,7 @@ RUN apk add --no-cache \
       linux-headers && \
     python3 -m venv /venv && \
     pip install --upgrade pip setuptools wheel && \
-    pip install bleak && \
+    pip install bleak asyncio-mqtt && \
     apk del build-base libffi-dev openssl-dev linux-headers && \
     rm -rf /var/cache/apk/*
 
@@ -27,5 +27,4 @@ COPY main.py /main.py
 
 RUN chmod +x /run.sh
 
-# Делаем run.sh именно PID 1
 ENTRYPOINT ["/run.sh"]
