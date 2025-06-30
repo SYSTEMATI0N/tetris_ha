@@ -18,7 +18,7 @@ RUN apk add --no-cache \
       linux-headers && \
     python3 -m venv /venv && \
     pip install --upgrade pip setuptools wheel && \
-    pip install bleak aiomqtt && \
+    pip install bleak aiohttp && \
     apk del build-base libffi-dev openssl-dev linux-headers && \
     rm -rf /var/cache/apk/*
 
