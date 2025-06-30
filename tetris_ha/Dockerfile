@@ -24,5 +24,4 @@ COPY main.py /main.py
 # Устанавливаем разрешения
 RUN chmod +x /run.sh
 
-# Точка входа
 CMD [ "/run.sh" ]
