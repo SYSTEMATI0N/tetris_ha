@@ -347,7 +347,7 @@ async def handle_mode(request):
     elif cmd == "Стоп":
         if game_task and not game_task.done():
             game_task.cancel()
-                        try:
+            try:
                 await game_task
             except asyncio.CancelledError:
                 pass
