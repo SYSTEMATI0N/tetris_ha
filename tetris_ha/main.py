@@ -4,7 +4,6 @@ from bleak import BleakClient
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
 
-client = BleakClient(DEVICE_ADDRESS)
 
 CMD_MAP = {
     "Вкл": bytearray.fromhex("7e0704ff00010201ef"),
@@ -18,6 +17,7 @@ CMD_MAP = {
     "Жёлтый": bytearray.fromhex("7e070503ffff0010ef"),
     "Розовый": bytearray.fromhex("7e070503ff008010ef"),
 }
+client = BleakClient(DEVICE_ADDRESS)
 
 async def ble_connect():
     if not client.is_connected:
