@@ -280,25 +280,17 @@ async def game_loop(client):
 # Обработчик HTTP-запроса
 async def handle_mode(request):
     global game_task
-    cmd = request.rel_url.query.get("cmd")
-    if cmd is None:
-        return web.Response(text="Параметр cmd обязателен", status=400)
-    cmd = cmd.strip()
-    print(f"HTTP: получена команда: {cmd}")
+    cmd = request.query.get("cmd", "").strip()
+    print(f"HTTP: получена команда: {cmd!r}")
+    client: BleakClient = request.app['ble_client']
 
-    client = request.app['ble_client']
-
-    # Обработка команды
     if cmd == "Тетрис":
-     if game_task is None or game_task.done():
-        if not client.is_connected:
-            await client.connect()
-            await client.get_services()
-        print("⏳ Переход в режим индивидуального управления диодами...")
-        await enter_per_led_mode(client)
-        game_task = asyncio.create_task(game_loop(client))
-        return web.Response(text="Игра Тетрис запущена")
-     else:
+        if not game_task or game_task.done():
+            print("⏳ Переход в режим индивидуального управления диодами…")
+            await enter_per_led_mode(client)
+            game_task = asyncio.create_task(game_loop(client))
+            print("🕹️ game_task создан:", game_task)
+            return web.Response(text="Игра Тетрис запущена")
         return web.Response(text="Игра уже запущена")
     elif cmd == "Стоп":
         if game_task and not game_task.done():
@@ -336,13 +328,10 @@ async def start_app(client):
 
 async def main():
     async with BleakClient(DEVICE_ADDRESS) as client:
-        if not client.is_connected:
-            print("❌ Не удалось подключиться к BLE устройству.")
-            return
-        print("✅ Подключено к BLE.")
+        await client.connect()
         await enter_per_led_mode(client)
         await start_app(client)
-        await asyncio.Event().wait()  # Ждем вечности, пока не убьют процесс
+        await asyncio.Event().wait()
 
 if __name__ == '__main__':
     asyncio.run(main())
