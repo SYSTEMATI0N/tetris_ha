@@ -6,6 +6,19 @@ CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
 
 client = BleakClient(DEVICE_ADDRESS)
 
+CMD_MAP = {
+    "Вкл": bytearray.fromhex("7e0704ff00010201ef"),
+    "Выкл": bytearray.fromhex("7e07040000000201ef"),
+    "Синий": bytearray.fromhex("7e0705030000ff10ef"),
+    "Бирюзовый": bytearray.fromhex("7e07050300ffff10ef"),
+    "Зеленый": bytearray.fromhex("7e07050300ff0010ef"),
+    "Красный": bytearray.fromhex("7e070503ff000010ef"),
+    "Фиолетовый": bytearray.fromhex("7e070503ff00ff10ef"),
+    "Белый": bytearray.fromhex("7e070503ffffff10ef"),
+    "Жёлтый": bytearray.fromhex("7e070503ffff0010ef"),
+    "Розовый": bytearray.fromhex("7e070503ff008010ef"),
+}
+
 async def ble_connect():
     if not client.is_connected:
         await client.connect()
@@ -59,18 +72,6 @@ INIT_CMDS = [
     bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
 ]
 
-CMD_MAP = {
-    "Вкл": bytearray.fromhex("7e0704ff00010201ef"),
-    "Выкл": bytearray.fromhex("7e07040000000201ef"),
-    "Синий": bytearray.fromhex("7e0705030000ff10ef"),
-    "Бирюзовый": bytearray.fromhex("7e07050300ffff10ef"),
-    "Зеленый": bytearray.fromhex("7e07050300ff0010ef"),
-    "Красный": bytearray.fromhex("7e070503ff000010ef"),
-    "Фиолетовый": bytearray.fromhex("7e070503ff00ff10ef"),
-    "Белый": bytearray.fromhex("7e070503ffffff10ef"),
-    "Жёлтый": bytearray.fromhex("7e070503ffff0010ef"),
-    "Розовый": bytearray.fromhex("7e070503ff008010ef"),
-}
 
 def rgb_to_hex_str(rgb):
     return ''.join(f"{c:02x}" for c in rgb)
