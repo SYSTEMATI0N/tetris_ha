@@ -1,0 +1,16 @@
+{
+  "name": "Tetris HA",
+  "version": "1.0.0",
+  "slug": "tetris_ha",
+  "description": "Tetris LED BLE visualizer",
+  "startup": "application",
+  "boot": "auto",
+  "ingress": false,
+  "host_network": true,
+  "audio": true,
+  "udev": true,
+  "full_access": true,
+  "privileged": ["SYS_ADMIN", "NET_ADMIN"],
+  "options": {},
+  "schema": {}
+}
