@@ -141,8 +141,31 @@ TETROMINOS = {
 }
 
 
+import random
+
+ROWS, COLS = 20, 20
+COLOR_BLACK = (0, 0, 0)
+COLOR_PALETTE = [
+    (20, 0, 80),
+    (56, 0, 145),
+    (57, 0, 98),
+    (108, 0, 142),
+    (180, 0, 82),
+    (95, 24, 13),
+]
+
+TETROMINOS = {
+    'I': [(0, 0), (1, 0), (2, 0), (3, 0)],
+    'O': [(0, 0), (0, 1), (1, 0), (1, 1)],
+    'T': [(0, 1), (1, 0), (1, 1), (1, 2)],
+    'L': [(0, 0), (1, 0), (2, 0), (2, 1)],
+    'J': [(0, 1), (1, 1), (2, 1), (2, 0)],
+    'S': [(0, 1), (0, 2), (1, 0), (1, 1)],
+    'Z': [(0, 0), (0, 1), (1, 1), (1, 2)],
+}
+
 class TetrisGame:
-    def __init__(self, cols_start, cols_count):
+    def __init__(self, cols_start: int, cols_count: int):
         self.cols_start = cols_start
         self.cols_count = cols_count
         self.field = [[False]*cols_count for _ in range(ROWS)]
@@ -153,7 +176,6 @@ class TetrisGame:
         self.piece_blocks = []
         self.piece_color = COLOR_PALETTE[0]
         self.game_over = False
-        self.locked_pieces_count = 0
         self.spawn_new_piece()
 
     def spawn_new_piece(self):
@@ -162,12 +184,13 @@ class TetrisGame:
         self.piece_row = -2
         self.piece_col = self.cols_count // 2 - 2
         self.piece_color = random.choice(COLOR_PALETTE)
+        # Проверка Game Over при спавне
         for r, c in self.piece_blocks:
             nr = self.piece_row + r
             nc = self.piece_col + c
             if 0 <= nr < ROWS and self.field[nr][nc]:
                 self.game_over = True
-                print(f"💀 Game Over на поле начиная с колонки {self.cols_start}! Перезапуск...")
+                print(f"💀 Game Over на поле с колонки {self.cols_start}! Перезапуск...")
                 self.reset_game()
                 break
 
@@ -175,7 +198,6 @@ class TetrisGame:
         self.field = [[False]*self.cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(self.cols_count)] for _ in range(ROWS)]
         self.game_over = False
-        self.locked_pieces_count = 0
         self.spawn_new_piece()
 
     def can_move(self, dr, dc):
@@ -186,7 +208,7 @@ class TetrisGame:
                 return False
             if nr >= 0 and self.field[nr][nc]:
                 return False
-            if nr < -2:
+            if nr < -2:  # За верхний край (немного выше видимого поля)
                 return False
         return True
 
@@ -197,20 +219,20 @@ class TetrisGame:
             if 0 <= nr < ROWS and 0 <= nc < self.cols_count:
                 self.field[nr][nc] = True
                 self.color_field[nr][nc] = self.piece_color
-        self.locked_pieces_count += 1
         self.clear_lines()
         self.spawn_new_piece()
 
     def clear_lines(self):
         new_field = []
         new_color_field = []
-        lines_cleared = 0
         for row_idx in range(ROWS):
             if all(self.field[row_idx]):
-                lines_cleared += 1
-            else:
-                new_field.append(self.field[row_idx])
-                new_color_field.append(self.color_field[row_idx])
+                # Линия заполнена — удаляем
+                continue
+            new_field.append(self.field[row_idx])
+            new_color_field.append(self.color_field[row_idx])
+        # Добавляем пустые линии сверху
+        lines_cleared = ROWS - len(new_field)
         for _ in range(lines_cleared):
             new_field.insert(0, [False]*self.cols_count)
             new_color_field.insert(0, [COLOR_BLACK]*self.cols_count)
@@ -219,8 +241,9 @@ class TetrisGame:
 
     def rotate_piece(self):
         if self.current_piece == 'O':
-            return
+            return  # Квадрат не вращается
         new_blocks = [(-c, r) for r, c in self.piece_blocks]
+        # Проверяем валидность поворота
         for r, c in new_blocks:
             nr = self.piece_row + r
             nc = self.piece_col + c
@@ -234,6 +257,7 @@ class TetrisGame:
         if self.game_over:
             return
 
+        # Попытка двигаться в сторону с меньшим заполнением (пример логики)
         left_fill = self.column_fill(self.piece_col - 1) if self.piece_col > 0 else 1000
         right_fill = self.column_fill(self.piece_col + max(c for _, c in self.piece_blocks) + 1) if (self.piece_col + max(c for _, c in self.piece_blocks) + 1) < self.cols_count else 1000
 
@@ -242,12 +266,14 @@ class TetrisGame:
         elif right_fill < left_fill and self.can_move(0, 1):
             self.piece_col += 1
 
+        # Случайный поворот с вероятностью 30%
         if random.random() < 0.3:
             old_blocks = self.piece_blocks[:]
             self.rotate_piece()
             if not self.can_move(0, 0):
                 self.piece_blocks = old_blocks
 
+        # Движение вниз или фиксация
         if self.can_move(1, 0):
             self.piece_row += 1
         else:
@@ -255,20 +281,23 @@ class TetrisGame:
 
     def column_fill(self, col):
         if col < 0 or col >= self.cols_count:
-            return 1000
+            return 1000  # вне поля — считаем сильно заполненным
         return sum(1 for r in range(ROWS) if self.field[r][col])
 
     def render(self, led_matrix):
+        # Копируем игровое поле в матрицу LED (сдвиг на 1, чтобы не выходить за край)
         for r in range(ROWS):
             for c in range(self.cols_count):
                 color = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
                 led_matrix[r+1][c + self.cols_start + 1] = color
 
+        # Рисуем текущую фигуру
         for r, c in self.piece_blocks:
             nr = self.piece_row + r + 1
             nc = self.piece_col + c + self.cols_start + 1
             if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
                 led_matrix[nr][nc] = self.piece_color
+
 # -----------------------
 
 # Game loop и управление задачей игры
