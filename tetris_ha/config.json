@@ -1,29 +1,33 @@
- {
-   "name": "Tetris HA",
-   "version": "1.0.3",
-   "slug": "tetris_ha",
-   …
--  "devices": [
--    "/dev/snd",
--    "/dev/bus/usb",
--    "/dev/ttyAMA0",
--    "/dev/ttyS0",
--    "/var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket"
--  ],
-+  "devices": [
-+    "/dev/snd",
-+    "/dev/bus/usb",
-+    "/dev/ttyAMA0",
-+    "/dev/ttyS0",
-+    {
-+      "host_path": "/var/run/dbus/system_bus_socket",
-+      "container_path": "/var/run/dbus/system_bus_socket",
-+      "permissions": "ro"
-+    }
-+  ],
-   "privileged": ["SYS_RAWIO", "SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH"],
-+  "environment": {
-+    "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/var/run/dbus/system_bus_socket"
-+  },
-   …
- }
+{
+  "name": "Tetris HA",
+  "version": "1.0.3",
+  "slug": "tetris_ha",
+  "description": "Tetris game visualizer for LED curtain via BLE",
+  "startup": "application",
+  "boot": "auto",
+  "arch": ["aarch64", "armv7", "amd64"],
+  "host_network": true,
+  "full_access": true,
+  "devices": [
+    "/dev/snd",
+    "/dev/bus/usb",
+    "/dev/ttyAMA0",
+    "/dev/ttyS0",
+    {
+      "host_path": "/var/run/dbus/system_bus_socket",
+      "container_path": "/var/run/dbus/system_bus_socket",
+      "permissions": "ro"
+    }
+  ],
+  "privileged": ["SYS_RAWIO", "SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH"],
+  "environment": {
+    "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/var/run/dbus/system_bus_socket"
+  },
+  "options": {},
+  "schema": {},
+  "build": {
+    "args": {
+      "BUILD_FROM": "ghcr.io/hassio-addons/base:14.4.1"
+    }
+  }
+}
