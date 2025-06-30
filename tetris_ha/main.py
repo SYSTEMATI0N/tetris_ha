@@ -1,10 +1,40 @@
-import asyncio
-import random
 from aiohttp import web
 from bleak import BleakClient
 
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
+
+client = BleakClient(DEVICE_ADDRESS)
+
+async def ble_connect():
+    if not client.is_connected:
+        await client.connect()
+        await client.get_services()
+
+async def send_control_command(cmd):
+    await ble_connect()
+    await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+
+async def handle_mode(request):
+    cmd = request.query.get("cmd")
+    if cmd in CMD_MAP:
+        try:
+            await send_control_command(CMD_MAP[cmd])
+            return web.Response(text=f"Команда {cmd} отправлена")
+        except Exception as e:
+            return web.Response(status=500, text=f"Ошибка BLE: {e}")
+    return web.Response(status=400, text="Неверная команда")
+
+app = web.Application()
+app.add_routes([web.get('/mode', handle_mode)])
+
+async def on_shutdown(app):
+    if client.is_connected:
+        await client.disconnect()
+
+app.on_shutdown.append(on_shutdown)
+
+web.run_app(app, host='0.0.0.0', port=8080)
 
 ROWS, COLS = 20, 20
 HALF_COLS = COLS // 2
