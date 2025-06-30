@@ -22,9 +22,9 @@ COLOR_PALETTE = [
 COLOR_BLACK = (0, 0, 0)
 
 INIT_CMDS = [
+    bytearray.fromhex("7e0704ff00010201ef"),
     bytearray.fromhex("7e075100ffffff00ef"),
     bytearray.fromhex("7e07580000ffff00ef"),
-    bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
 ]
 
 def rgb_to_hex_str(rgb):
