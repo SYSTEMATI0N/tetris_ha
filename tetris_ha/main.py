@@ -297,7 +297,7 @@ async def handle_mode(request):
         await enter_per_led_mode(client)
         game_task = asyncio.create_task(game_loop(client))
         return web.Response(text="Игра Тетрис запущена")
-      else:
+     else:
         return web.Response(text="Игра уже запущена")
     elif cmd == "Стоп":
         if game_task and not game_task.done():
