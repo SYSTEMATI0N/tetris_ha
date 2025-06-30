@@ -3,6 +3,7 @@ FROM $BUILD_FROM
 
 ENV LANG C.UTF-8
 
+# Устанавливаем системные зависимости и компиляторы для bleak
 RUN apk add --no-cache \
     python3 \
     py3-pip \
@@ -12,15 +13,13 @@ RUN apk add --no-cache \
     build-base \
     libffi-dev \
     openssl-dev \
-    linux-headers
+    linux-headers && \
+    pip3 install --no-cache-dir bleak
 
-RUN pip3 install --upgrade pip setuptools wheel
-
-RUN pip3 install --no-cache-dir bleak
-
+# Копируем исполняемые файлы
 COPY run.sh /run.sh
 COPY main.py /main.py
 
 RUN chmod +x /run.sh
 
-CMD [ "/run.sh" ]
+CMD ["/run.sh"]
