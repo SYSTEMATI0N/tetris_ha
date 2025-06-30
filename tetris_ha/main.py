@@ -28,16 +28,7 @@ async def send_control_command(cmd):
     await ble_connect()
     await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
-async def handle_mode(request):
-    global game_task  # 
-    cmd = request.query.get("cmd")
-    if cmd in CMD_MAP:
-        try:
-            await send_control_command(CMD_MAP[cmd])
-            return web.Response(text=f"Команда {cmd} отправлена")
-        except Exception as e:
-            return web.Response(status=500, text=f"Ошибка BLE: {e}")
-    return web.Response(status=400, text="Неверная команда")
+
 
 app = web.Application()
 app.add_routes([web.get('/mode', handle_mode)])
@@ -241,6 +232,7 @@ class TetrisGame:
 
 # Game loop и управление задачей игры
 game_task = None
+stop_event = asyncio.Event()
 
 async def game_loop(client):
     game1 = TetrisGame(0, HALF_COLS)
