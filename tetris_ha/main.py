@@ -1,12 +1,13 @@
 import asyncio
+import signal
 import random
 from bleak import BleakClient
 
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
 
-ROWS, COLS = 20, 20  # Общее поле
-HALF_COLS = COLS // 2  # 10
+ROWS, COLS = 20, 20
+HALF_COLS = COLS // 2
 
 FPS = 4
 
@@ -27,6 +28,12 @@ INIT_CMDS = [
     bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
 ]
 
+stop_event = asyncio.Event()
+
+def signal_handler():
+    print("⚠️ Получен сигнал завершения, завершаем игру...")
+    stop_event.set()
+
 def rgb_to_hex_str(rgb):
     return ''.join(f"{c:02x}" for c in rgb)
 
@@ -45,7 +52,7 @@ def build_command_from_pixels(pixels):
         i += 10
     return commands
 
-async def send_commands(client, commands, delay_between_packets=0.1):
+async def send_commands(client, commands):
     mtu = getattr(client, 'mtu_size', 23)
     max_payload = mtu - 3
     for cmd in commands:
@@ -53,12 +60,14 @@ async def send_commands(client, commands, delay_between_packets=0.1):
             chunk = cmd[i:i+max_payload]
             print(f"📦 Отправка BLE пакета: {chunk.hex()}")
             await client.write_gatt_char(CHAR_UUID, chunk, response=False)
-            await asyncio.sleep(delay_between_packets)  # Задержка между пакетами
+            await asyncio.sleep(0.02)  # Лёгкая задержка между чанками
 
 async def enter_per_led_mode(client):
     for cmd in INIT_CMDS:
         await send_commands(client, [cmd])
         await asyncio.sleep(0.05)
+
+# TETROMINOS и класс TetrisGame без изменений, вставляй сюда полностью
 
 TETROMINOS = {
     'I': [(0,0), (1,0), (2,0), (3,0)],
@@ -72,8 +81,8 @@ TETROMINOS = {
 
 class TetrisGame:
     def __init__(self, cols_start, cols_count):
-        self.cols_start = cols_start
-        self.cols_count = cols_count
+        self.cols_start = cols_start  # Начало по горизонтали (0 или 10)
+        self.cols_count = cols_count  # Ширина поля (10)
         self.field = [[False]*cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(cols_count)] for _ in range(ROWS)]
         self.current_piece = None
@@ -82,7 +91,7 @@ class TetrisGame:
         self.piece_blocks = []
         self.piece_color = COLOR_PALETTE[0]
         self.game_over = False
-        self.locked_pieces_count = 0
+        self.locked_pieces_count = 0  # счётчик упавших фигур
         self.spawn_new_piece()
 
     def spawn_new_piece(self):
@@ -189,6 +198,7 @@ class TetrisGame:
         return sum(1 for r in range(ROWS) if self.field[r][col])
 
     def render(self, led_matrix):
+        # Рисуем поле и фигуру в общий led_matrix
         for r in range(ROWS):
             for c in range(self.cols_count):
                 color = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
@@ -200,13 +210,14 @@ class TetrisGame:
             if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
                 led_matrix[nr][nc] = self.piece_color
 
+
 async def game_loop(client):
     game1 = TetrisGame(0, HALF_COLS)
     game2 = None
     led_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
     prev_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
 
-    while True:
+    while not stop_event.is_set():
         game1.update()
 
         if game2 is None and game1.locked_pieces_count >= 10:
@@ -236,11 +247,15 @@ async def game_loop(client):
 
         if changed:
             commands = build_command_from_pixels(changed)
-            await send_commands(client, commands, delay_between_packets=0.1)  # <-- здесь задержка
+            await send_commands(client, commands)
 
         await asyncio.sleep(1 / FPS)
 
 async def run():
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+
     async with BleakClient(DEVICE_ADDRESS) as client:
         if not client.is_connected:
             print("❌ Не удалось подключиться.")
@@ -248,6 +263,8 @@ async def run():
         print("✅ Подключено.")
         await enter_per_led_mode(client)
         await game_loop(client)
+
+    print("🛑 Отключено от устройства.")
 
 if __name__ == '__main__':
     asyncio.run(run())
