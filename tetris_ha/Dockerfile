@@ -4,8 +4,7 @@ FROM ${BUILD_FROM}
 ENV LANG C.UTF-8
 ENV PATH="/venv/bin:${PATH}"
 
-# 1) Системные библиотеки
-# 2) Создание venv и установка bleak + asyncio-mqtt
+# Установка системных библиотек, создание виртуального окружения и установка зависимостей
 RUN apk add --no-cache \
       python3 \
       py3-pip \
@@ -17,8 +16,8 @@ RUN apk add --no-cache \
       openssl-dev \
       linux-headers && \
     python3 -m venv /venv && \
-    pip install --upgrade pip setuptools wheel && \
-    pip install bleak aiohttp && \
+    /venv/bin/pip install --upgrade pip setuptools wheel && \
+    /venv/bin/pip install bleak aiohttp asyncio-mqtt && \
     apk del build-base libffi-dev openssl-dev linux-headers && \
     rm -rf /var/cache/apk/*
 
