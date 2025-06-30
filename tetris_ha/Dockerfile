@@ -3,18 +3,21 @@ FROM $BUILD_FROM
 
 ENV LANG C.UTF-8
 
-# Устанавливаем только необходимые зависимости для Python и Bluetooth
 RUN apk add --no-cache \
     python3 \
     py3-pip \
     py3-numpy \
     bluez \
-    bash
+    bash \
+    build-base \
+    libffi-dev \
+    openssl-dev \
+    linux-headers
 
-# Устанавливаем bleak для работы с BLE
+RUN pip3 install --upgrade pip setuptools wheel
+
 RUN pip3 install --no-cache-dir bleak
 
-# Копируем скрипты
 COPY run.sh /run.sh
 COPY main.py /main.py
 
