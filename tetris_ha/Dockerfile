@@ -1,13 +1,19 @@
-ARG BUILD_FROM=ghcr.io/hassio-addons/base-debian:14.0.3
+ARG BUILD_FROM=ghcr.io/hassio-addons/base:14.4.1
 FROM $BUILD_FROM
 
 ENV LANG C.UTF-8
 
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip python3-numpy python3-pyaudio bluez pulseaudio alsa-utils \
-    && pip3 install bleak \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    py3-numpy \
+    py3-pyaudio \
+    bluez \
+    pulseaudio \
+    pulseaudio-alsa \
+    alsa-utils \
+    bash && \
+    pip3 install --no-cache-dir bleak
 
 COPY run.sh /run.sh
 COPY main.py /main.py
