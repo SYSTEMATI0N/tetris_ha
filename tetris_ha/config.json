@@ -1,28 +1,21 @@
 {
   "name": "Tetris HA",
-  "version": "1.0.4",
+  "version": "1.0.3",             
   "slug": "tetris_ha",
   "description": "Tetris game visualizer for LED curtain via BLE",
   "startup": "application",
   "boot": "auto",
   "arch": ["aarch64", "armv7", "amd64"],
   "host_network": true,
+  "host_dbus": true,               
   "full_access": true,
   "devices": [
     "/dev/snd",
     "/dev/bus/usb",
     "/dev/ttyAMA0",
-    "/dev/ttyS0",
-    {
-      "host_path": "/var/run/dbus/system_bus_socket",
-      "container_path": "/var/run/dbus/system_bus_socket",
-      "permissions": "ro"
-    }
+    "/dev/ttyS0"
   ],
   "privileged": ["SYS_RAWIO", "SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH"],
-  "environment": {
-    "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/var/run/dbus/system_bus_socket"
-  },
   "options": {},
   "schema": {},
   "build": {
