@@ -1,6 +1,7 @@
 import asyncio
 import random
-from aiomqtt import Client as MqttClient, MqttError
+import signal
+from asyncio_mqtt import Client as MqttClient, MqttError
 from bleak import BleakClient
 
 # Constants
@@ -51,6 +52,14 @@ TETROMINOS = {
     'J': [(0,0), (1,0), (2,0), (2,1)],
     'L': [(0,1), (1,1), (2,0), (2,1)],
 }
+
+# Global stop event
+stop_event = asyncio.Event()
+
+# Signal handler
+def signal_handler():
+    print("⚠️ Получен SIGTERM/SIGINT — остановка...")
+    stop_event.set()
 
 # Tetris Game Class
 class TetrisGame:
@@ -226,6 +235,8 @@ async def mqtt_handler(client_ble):
             async with client_mqtt.unfiltered_messages() as messages:
                 await client_mqtt.subscribe(MQTT_TOPIC)
                 async for message in messages:
+                    if stop_event.is_set():
+                        break
                     mode = message.payload.decode('utf-8')
                     print(f"MQTT: получена команда: {mode}")
                     if mode == "Тетрис":
@@ -256,7 +267,7 @@ async def game_loop(client_ble):
         game2 = None
         led_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
         prev_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
-        while True:
+        while not stop_event.is_set():
             game1.update()
             if game2 is None and game1.locked_pieces_count >= 10:
                 print("🚀 Запуск второй игры после 10 упавших фигур!")
@@ -286,6 +297,10 @@ async def game_loop(client_ble):
 
 # Main Run Function
 async def run():
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+
     async with BleakClient(DEVICE_ADDRESS) as client_ble:
         if not client_ble.is_connected:
             print("❌ Не удалось подключиться к BLE устройству.")
@@ -293,9 +308,17 @@ async def run():
         print("✅ Подключено к BLE.")
         mqtt_task = asyncio.create_task(mqtt_handler(client_ble))
         try:
-            await mqtt_task
+            await asyncio.gather(mqtt_task, return_exceptions=True)
         except asyncio.CancelledError:
             pass
+        finally:
+            if game_task is not None and not game_task.done():
+                game_task.cancel()
+                try:
+                    await game_task
+                except asyncio.CancelledError:
+                    pass
+        print("🛑 Отключено от устройства.")
 
 if __name__ == "__main__":
     try:
