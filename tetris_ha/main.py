@@ -22,9 +22,9 @@ COLOR_PALETTE = [
 COLOR_BLACK = (0, 0, 0)
 
 INIT_CMDS = [
-    bytearray.fromhex("7e0704ff00010201ef"),
     bytearray.fromhex("7e075100ffffff00ef"),
     bytearray.fromhex("7e07580000ffff00ef"),
+    bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
 ]
 
 def rgb_to_hex_str(rgb):
@@ -45,7 +45,7 @@ def build_command_from_pixels(pixels):
         i += 10
     return commands
 
-async def send_commands(client, commands):
+async def send_commands(client, commands, delay_between_packets=0.1):
     mtu = getattr(client, 'mtu_size', 23)
     max_payload = mtu - 3
     for cmd in commands:
@@ -53,6 +53,7 @@ async def send_commands(client, commands):
             chunk = cmd[i:i+max_payload]
             print(f"📦 Отправка BLE пакета: {chunk.hex()}")
             await client.write_gatt_char(CHAR_UUID, chunk, response=False)
+            await asyncio.sleep(delay_between_packets)  # Задержка между пакетами
 
 async def enter_per_led_mode(client):
     for cmd in INIT_CMDS:
@@ -71,8 +72,8 @@ TETROMINOS = {
 
 class TetrisGame:
     def __init__(self, cols_start, cols_count):
-        self.cols_start = cols_start  # Начало по горизонтали (0 или 10)
-        self.cols_count = cols_count  # Ширина поля (10)
+        self.cols_start = cols_start
+        self.cols_count = cols_count
         self.field = [[False]*cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(cols_count)] for _ in range(ROWS)]
         self.current_piece = None
@@ -81,7 +82,7 @@ class TetrisGame:
         self.piece_blocks = []
         self.piece_color = COLOR_PALETTE[0]
         self.game_over = False
-        self.locked_pieces_count = 0  # счётчик упавших фигур
+        self.locked_pieces_count = 0
         self.spawn_new_piece()
 
     def spawn_new_piece(self):
@@ -188,7 +189,6 @@ class TetrisGame:
         return sum(1 for r in range(ROWS) if self.field[r][col])
 
     def render(self, led_matrix):
-        # Рисуем поле и фигуру в общий led_matrix
         for r in range(ROWS):
             for c in range(self.cols_count):
                 color = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
@@ -216,17 +216,14 @@ async def game_loop(client):
         if game2:
             game2.update()
 
-        # Очистка led_matrix
         for r in range(ROWS+2):
             for c in range(COLS+2):
                 led_matrix[r][c] = COLOR_BLACK
 
-        # Отрисовка обеих игр
         game1.render(led_matrix)
         if game2:
             game2.render(led_matrix)
 
-        # Вычисляем изменённые пиксели
         changed = []
         for r in range(1, ROWS+1):
             for c in range(1, COLS+1):
@@ -239,7 +236,7 @@ async def game_loop(client):
 
         if changed:
             commands = build_command_from_pixels(changed)
-            await send_commands(client, commands)
+            await send_commands(client, commands, delay_between_packets=0.1)  # <-- здесь задержка
 
         await asyncio.sleep(1 / FPS)
 
