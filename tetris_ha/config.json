@@ -9,7 +9,7 @@
   "host_network": true,
   "full_access": true,
   "devices": ["/dev/snd","/dev/bus/usb","/dev/ttyAMA0","/dev/ttyS0"],
-  "privileged": ["SYS_RAWIO","SYS_ADMIN","NET_ADMIN","DAC_READ_SEARCH","DAC_OVERRIDE"],
+  "privileged": ["SYS_RAWIO","SYS_ADMIN","NET_ADMIN","DAC_READ_SEARCH"],
   "options": {},
   "schema": {}
 }
