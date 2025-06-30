@@ -52,8 +52,7 @@ def build_command_from_pixels(pixels):
         i += 10
     return commands
 
-async def send_commands(client, commands):
-    mtu = getattr(client, 'mtu_size', 23)
+async def send_commands(client, commands, mtu=23):
     max_payload = mtu - 3
     for cmd in commands:
         for i in range(0, len(cmd), max_payload):
@@ -62,12 +61,10 @@ async def send_commands(client, commands):
             await client.write_gatt_char(CHAR_UUID, chunk, response=False)
             await asyncio.sleep(0.02)  # Лёгкая задержка между чанками
 
-async def enter_per_led_mode(client):
+async def enter_per_led_mode(client, mtu=23):
     for cmd in INIT_CMDS:
-        await send_commands(client, [cmd])
+        await send_commands(client, [cmd], mtu)
         await asyncio.sleep(0.05)
-
-# TETROMINOS и класс TetrisGame без изменений, вставляй сюда полностью
 
 TETROMINOS = {
     'I': [(0,0), (1,0), (2,0), (3,0)],
@@ -81,8 +78,8 @@ TETROMINOS = {
 
 class TetrisGame:
     def __init__(self, cols_start, cols_count):
-        self.cols_start = cols_start  # Начало по горизонтали (0 или 10)
-        self.cols_count = cols_count  # Ширина поля (10)
+        self.cols_start = cols_start
+        self.cols_count = cols_count
         self.field = [[False]*cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(cols_count)] for _ in range(ROWS)]
         self.current_piece = None
@@ -91,7 +88,7 @@ class TetrisGame:
         self.piece_blocks = []
         self.piece_color = COLOR_PALETTE[0]
         self.game_over = False
-        self.locked_pieces_count = 0  # счётчик упавших фигур
+        self.locked_pieces_count = 0
         self.spawn_new_piece()
 
     def spawn_new_piece(self):
@@ -198,7 +195,6 @@ class TetrisGame:
         return sum(1 for r in range(ROWS) if self.field[r][col])
 
     def render(self, led_matrix):
-        # Рисуем поле и фигуру в общий led_matrix
         for r in range(ROWS):
             for c in range(self.cols_count):
                 color = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
@@ -211,7 +207,7 @@ class TetrisGame:
                 led_matrix[nr][nc] = self.piece_color
 
 
-async def game_loop(client):
+async def game_loop(client, mtu):
     game1 = TetrisGame(0, HALF_COLS)
     game2 = None
     led_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
@@ -247,7 +243,7 @@ async def game_loop(client):
 
         if changed:
             commands = build_command_from_pixels(changed)
-            await send_commands(client, commands)
+            await send_commands(client, commands, mtu)
 
         await asyncio.sleep(1 / FPS)
 
@@ -262,7 +258,6 @@ async def run():
             return
         print("✅ Подключено.")
 
-        # Запрашиваем максимальный MTU (если доступно)
         if hasattr(client, "_acquire_mtu"):
             mtu = await client._acquire_mtu()
             print(f"🔧 MTU установлен в: {mtu}")
@@ -270,14 +265,10 @@ async def run():
             mtu = 23
             print("⚠️ Метод _acquire_mtu() недоступен, используем MTU по умолчанию 23")
 
-        # Пропишем mtu в клиент для send_commands
-        client.mtu_size = mtu
-
-        await enter_per_led_mode(client)
-        await game_loop(client)
+        await enter_per_led_mode(client, mtu)
+        await game_loop(client, mtu)
 
     print("🛑 Отключено от устройства.")
-
 
 if __name__ == '__main__':
     asyncio.run(run())
