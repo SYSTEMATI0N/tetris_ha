@@ -290,6 +290,7 @@ async def handle_mode(request):
     # Обработка команды
     if cmd == "Тетрис":
         if game_task is None or game_task.done():
+            await enter_per_led_mode(client)
             game_task = asyncio.create_task(game_loop(client))
             return web.Response(text="Игра Тетрис запущена")
         else:
