@@ -1,8 +1,26 @@
 import asyncio
-from aiohttp import web
-from bleak import BleakClient
 import random
-import copy
+from aiohttp import web
+
+# Константы
+COLOR_BLACK = (0, 0, 0)
+COLOR_PALETTE = [
+    (0, 255, 255),  # Cyan
+    (255, 255, 0),  # Yellow
+    (128, 0, 128),  # Purple
+    (255, 165, 0),  # Orange
+    (0, 0, 255),    # Blue
+    (0, 255, 0),    # Green
+    (255, 0, 0),    # Red
+]
+ROWS, COLS = 20, 20
+HALF_COLS = COLS // 2
+FPS = 4
+TARGET_HEIGHT = ROWS / 2
+ALPHA = 1.0  # weight for height deviation
+BETA = 5.0   # weight for holes
+GAMMA = 2.0  # weight for height variance
+HELP_THRESHOLD = 16
 
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
@@ -43,22 +61,12 @@ async def handle_mode(request):
             return web.Response(status=500, text=f"Ошибка BLE: {e}")
     return web.Response(status=400, text="Неверная команда")
 
-ROWS, COLS = 20, 20
-HALF_COLS = COLS // 2
-FPS = 4
+
 
 stop_event = asyncio.Event()
 
-COLOR_PALETTE = [
-    (20, 0, 80),
-    (56, 0, 145),
-    (57, 0, 98),
-    (108, 0, 142),
-    (180, 0, 82),
-    (95, 24, 13),
-]
 
-COLOR_BLACK = (0, 0, 0)
+
 
 INIT_CMDS = [
     bytearray.fromhex("7e075100ffffff00ef"),
