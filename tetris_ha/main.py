@@ -7,6 +7,7 @@ import copy
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
 
+
 CMD_MAP = {
     "Вкл": bytearray.fromhex("7e0704ff00010201ef"),
     "Выкл": bytearray.fromhex("7e07040000000201ef"),
@@ -19,7 +20,7 @@ CMD_MAP = {
     "Жёлтый": bytearray.fromhex("7e070503ffff0010ef"),
     "Розовый": bytearray.fromhex("7e070503ff008010ef"),
 }
-client = None
+client = None 
 
 async def ble_connect():
     global client
@@ -30,12 +31,13 @@ async def ble_connect():
         await client.connect()
         await client.get_services()
 
+
 async def handle_mode(request):
-    global game_task
+    global game_task  # 
     cmd = request.query.get("cmd")
     if cmd in CMD_MAP:
         try:
-            await send_control_command(client, CMD_MAP[cmd])
+            await send_control_command(CMD_MAP[cmd])
             return web.Response(text=f"Команда {cmd} отправлена")
         except Exception as e:
             return web.Response(status=500, text=f"Ошибка BLE: {e}")
@@ -63,6 +65,7 @@ INIT_CMDS = [
     bytearray.fromhex("7e07580000ffff00ef"),
     bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
 ]
+
 
 def rgb_to_hex_str(rgb):
     return ''.join(f"{c:02x}" for c in rgb)
@@ -102,6 +105,7 @@ async def send_commands(client, commands):
         for cmd in commands:
             await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
+
 async def send_control_command(client, cmd):
     try:
         if not client.is_connected:
@@ -119,12 +123,13 @@ async def send_control_command(client, cmd):
         await client.get_services()
         await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
+
 async def enter_per_led_mode(client):
     for cmd in INIT_CMDS:
         await send_commands(client, [cmd])
         await asyncio.sleep(0.05)
 
-# --- TetrisGame класс ---
+# --- TetrisGame класс 
 TETROMINOS = {
     'I': [(0, 0), (1, 0), (2, 0), (3, 0)],
     'O': [(0, 0), (0, 1), (1, 0), (1, 1)],
@@ -134,6 +139,7 @@ TETROMINOS = {
     'S': [(0, 1), (0, 2), (1, 0), (1, 1)],
     'Z': [(0, 0), (0, 1), (1, 1), (1, 2)],
 }
+
 
 class TetrisGame:
     def __init__(self, cols_start, cols_count):
@@ -228,33 +234,23 @@ class TetrisGame:
         if self.game_over:
             return
 
-        # Автоматическое горизонтальное смещение: в сторону меньшего заполнения
         left_fill = self.column_fill(self.piece_col - 1) if self.piece_col > 0 else 1000
         right_fill = self.column_fill(self.piece_col + max(c for _, c in self.piece_blocks) + 1) if (self.piece_col + max(c for _, c in self.piece_blocks) + 1) < self.cols_count else 1000
 
         if left_fill < right_fill and self.can_move(0, -1):
             self.piece_col -= 1
-            print(f"Движение влево: col={self.piece_col}")
         elif right_fill < left_fill and self.can_move(0, 1):
             self.piece_col += 1
-            print(f"Движение вправо: col={self.piece_col}")
 
-        # С вероятностью 0.3 пытаемся повернуть
         if random.random() < 0.3:
             old_blocks = self.piece_blocks[:]
             self.rotate_piece()
             if not self.can_move(0, 0):
                 self.piece_blocks = old_blocks
-                print("Поворот отменён из-за коллизии")
-            else:
-                print("Поворот выполнен")
 
-        # Движение вниз, если возможно
         if self.can_move(1, 0):
             self.piece_row += 1
-            print(f"Движение вниз: row={self.piece_row}")
         else:
-            print("Фигура заблокирована, фиксируем")
             self.lock_piece()
 
     def column_fill(self, col):
@@ -263,21 +259,19 @@ class TetrisGame:
         return sum(1 for r in range(ROWS) if self.field[r][col])
 
     def render(self, led_matrix):
-        # Отрисовка поля
         for r in range(ROWS):
             for c in range(self.cols_count):
                 color = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
                 led_matrix[r+1][c + self.cols_start + 1] = color
 
-        # Отрисовка текущей фигуры
         for r, c in self.piece_blocks:
             nr = self.piece_row + r + 1
             nc = self.piece_col + c + self.cols_start + 1
             if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
                 led_matrix[nr][nc] = self.piece_color
-
 # -----------------------
 
+# Game loop и управление задачей игры
 game_task = None
 
 async def game_loop(client):
@@ -294,15 +288,12 @@ async def game_loop(client):
                 game2 = TetrisGame(HALF_COLS, HALF_COLS)
             if game2:
                 game2.update()
-
             for r in range(ROWS+2):
                 for c in range(COLS+2):
                     led_matrix[r][c] = COLOR_BLACK
-
             game1.render(led_matrix)
             if game2:
                 game2.render(led_matrix)
-
             changed = []
             for r in range(1, ROWS+1):
                 for c in range(1, COLS+1):
@@ -310,19 +301,17 @@ async def game_loop(client):
                         rotated_row = c
                         rotated_col = ROWS - r + 1
                         changed.append((rotated_row, rotated_col, led_matrix[r][c]))
-
             prev_matrix = [row[:] for row in led_matrix]
-
             if changed:
                 commands = build_command_from_pixels(changed)
                 await send_commands(client, commands)
-
             await asyncio.sleep(1 / FPS)
     except asyncio.CancelledError:
         print("Игра остановлена")
-
 # -----------------------
 
+
+# Обработчик HTTP-запроса
 async def handle_mode(request):
     global game_task
     cmd = request.rel_url.query.get("cmd")
@@ -333,17 +322,18 @@ async def handle_mode(request):
 
     client = request.app['ble_client']
 
+    # Обработка команды
     if cmd == "Тетрис":
-        if game_task is None or game_task.done():
-            if not client.is_connected:
-                await client.connect()
-                await client.get_services()
-            print("⏳ Переход в режим индивидуального управления диодами...")
-            await enter_per_led_mode(client)
-            game_task = asyncio.create_task(game_loop(client))
-            return web.Response(text="Игра Тетрис запущена")
-        else:
-            return web.Response(text="Игра уже запущена")
+     if game_task is None or game_task.done():
+        if not client.is_connected:
+            await client.connect()
+            await client.get_services()
+        print("⏳ Переход в режим индивидуального управления диодами...")
+        await enter_per_led_mode(client)
+        game_task = asyncio.create_task(game_loop(client))
+        return web.Response(text="Игра Тетрис запущена")
+     else:
+        return web.Response(text="Игра уже запущена")
     elif cmd == "Стоп":
         if game_task and not game_task.done():
             game_task.cancel()
@@ -378,9 +368,8 @@ async def start_app(client):
             await client.disconnect()
 
     app.on_shutdown.append(on_shutdown)
-
+    
     app.add_routes([web.get('/mode', handle_mode)])
-
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
@@ -398,5 +387,4 @@ async def main():
         await asyncio.Event().wait()  # Ждем вечности, пока не убьют процесс
 
 if __name__ == '__main__':
-    asyncio.run(main())
-
+    asyncio.run(main())Открой этот код в конве и реализуй в нем логику автоматического управления фигурами, как в коде выше.
