@@ -75,7 +75,6 @@ async def enter_per_led_mode(client):
         await asyncio.sleep(0.05)
 
 # --- TetrisGame класс 
-# ... вставь сюда класс TetrisGame из твоего кода ...
 
 
 class TetrisGame:
