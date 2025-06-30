@@ -1,10 +1,12 @@
+import asyncio
+import random
 from aiohttp import web
 from bleak import BleakClient
 
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
 
-
+# Цветовые инициализационные команды и карта простых команд
 CMD_MAP = {
     "Вкл": bytearray.fromhex("7e0704ff00010201ef"),
     "Выкл": bytearray.fromhex("7e07040000000201ef"),
@@ -17,60 +19,20 @@ CMD_MAP = {
     "Жёлтый": bytearray.fromhex("7e070503ffff0010ef"),
     "Розовый": bytearray.fromhex("7e070503ff008010ef"),
 }
-client = BleakClient(DEVICE_ADDRESS)
-
-async def ble_connect():
-    if not client.is_connected:
-        await client.connect()
-        await client.get_services()
-
-async def send_control_command(cmd):
-    await ble_connect()
-    await client.write_gatt_char(CHAR_UUID, cmd, response=False)
-
-async def handle_mode(request):
-    global game_task  # 
-    cmd = request.query.get("cmd")
-    if cmd in CMD_MAP:
-        try:
-            await send_control_command(CMD_MAP[cmd])
-            return web.Response(text=f"Команда {cmd} отправлена")
-        except Exception as e:
-            return web.Response(status=500, text=f"Ошибка BLE: {e}")
-    return web.Response(status=400, text="Неверная команда")
-
-app = web.Application()
-app.add_routes([web.get('/mode', handle_mode)])
-
-async def on_shutdown(app):
-    if client.is_connected:
-        await client.disconnect()
-
-app.on_shutdown.append(on_shutdown)
-web.run_app(app, host='0.0.0.0', port=8080)
-ROWS, COLS = 20, 20
-HALF_COLS = COLS // 2
-FPS = 4
-
-stop_event = asyncio.Event()
-
-COLOR_PALETTE = [
-    (20, 0, 80),
-    (56, 0, 145),
-    (57, 0, 98),
-    (108, 0, 142),
-    (180, 0, 82),
-    (95, 24, 13),
-]
-
-COLOR_BLACK = (0, 0, 0)
-
 INIT_CMDS = [
     bytearray.fromhex("7e075100ffffff00ef"),
     bytearray.fromhex("7e07580000ffff00ef"),
     bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
 ]
 
+ROWS, COLS = 20, 20
+HALF_COLS = COLS // 2
+FPS = 4
+COLOR_PALETTE = [
+    (20, 0, 80), (56, 0, 145), (57, 0, 98),
+    (108, 0, 142), (180, 0, 82), (95, 24, 13),
+]
+COLOR_BLACK = (0, 0, 0)
 
 def rgb_to_hex_str(rgb):
     return ''.join(f"{c:02x}" for c in rgb)
@@ -80,13 +42,11 @@ def build_command_from_pixels(pixels):
     i = 0
     while i < len(pixels):
         chunk = pixels[i:i+10]
-        body = ""
+        body = ''
         for row, col, color in chunk:
             body += f"{row:02x}{col:02x}{rgb_to_hex_str(color)}"
-        for _ in range(10 - len(chunk)):
-            body += "ffffffffff"
-        cmd = bytearray.fromhex("7e0764" + body + "ef")
-        commands.append(cmd)
+        body += 'ffffffffff' * (10 - len(chunk))
+        commands.append(bytearray.fromhex("7e0764" + body + "ef"))
         i += 10
     return commands
 
@@ -95,15 +55,20 @@ async def send_commands(client, commands):
         print(f"📦 Отправка BLE пакета: {cmd.hex()}")
         await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
-async def send_control_command(client, cmd):
-    print(f"Отправка команды: {cmd.hex()}")
-    await client.write_gatt_char(CHAR_UUID, cmd, response=False)
-
 async def enter_per_led_mode(client):
     for cmd in INIT_CMDS:
         await send_commands(client, [cmd])
         await asyncio.sleep(0.05)
 
+TETROMINOS = {
+    'I': [(0, 0), (1, 0), (2, 0), (3, 0)],
+    'O': [(0, 0), (0, 1), (1, 0), (1, 1)],
+    'T': [(0, 1), (1, 0), (1, 1), (1, 2)],
+    'L': [(0, 0), (1, 0), (2, 0), (2, 1)],
+    'J': [(0, 1), (1, 1), (2, 1), (2, 0)],
+    'S': [(0, 1), (0, 2), (1, 0), (1, 1)],
+    'Z': [(0, 0), (0, 1), (1, 1), (1, 2)],
+}
 # --- TetrisGame класс 
 
 
@@ -123,7 +88,7 @@ class TetrisGame:
         self.spawn_new_piece()
 
     def spawn_new_piece(self):
-        self.current_piece = random.choice(list(TETROMINOS.keys()))
+        self.current_piece = random.choice(list(.keys()))
         self.piece_blocks = TETROMINOS[self.current_piece]
         self.piece_row = -2
         self.piece_col = self.cols_count // 2 - 2
