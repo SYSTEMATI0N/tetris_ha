@@ -1,0 +1,16 @@
+{
+  "name": "Audio Visualizer",
+  "version": "1.0.0",
+  "slug": "audio_visualizer",
+  "description": "Python visualizer for LED via BLE",
+  "arch": ["aarch64", "armv7"],
+  "startup": "application",
+  "boot": "auto",
+  "host_network": true,
+  "full_access": true,
+  "devices": ["/dev/snd", "/dev/bus/usb", "/dev/ttyAMA0", "/dev/ttyS0"],
+  "usb": true,
+  "privileged": ["SYS_RAWIO", "SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH", "DAC_OVERRIDE"],
+  "options": {},
+  "schema": {}
+}
