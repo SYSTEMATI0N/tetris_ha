@@ -19,10 +19,14 @@ CMD_MAP = {
     "Жёлтый": bytearray.fromhex("7e070503ffff0010ef"),
     "Розовый": bytearray.fromhex("7e070503ff008010ef"),
 }
-client = BleakClient(DEVICE_ADDRESS)
+client = None 
 
 async def ble_connect():
-    if not client.is_connected:
+    global client
+    if client is None or not client.is_connected:
+        if client is not None:
+            await client.disconnect()
+        client = BleakClient(DEVICE_ADDRESS)
         await client.connect()
         await client.get_services()
 
