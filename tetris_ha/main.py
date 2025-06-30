@@ -47,7 +47,7 @@ async def on_shutdown(app):
         await client.disconnect()
 
 app.on_shutdown.append(on_shutdown)
-
+web.run_app(app, host='0.0.0.0', port=8080)
 ROWS, COLS = 20, 20
 HALF_COLS = COLS // 2
 FPS = 4
