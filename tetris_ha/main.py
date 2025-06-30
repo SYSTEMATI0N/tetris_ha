@@ -289,12 +289,16 @@ async def handle_mode(request):
 
     # Обработка команды
     if cmd == "Тетрис":
-        if game_task is None or game_task.done():
-            await enter_per_led_mode(client)
-            game_task = asyncio.create_task(game_loop(client))
-            return web.Response(text="Игра Тетрис запущена")
-        else:
-            return web.Response(text="Игра уже запущена")
+     if game_task is None or game_task.done():
+        if not client.is_connected:
+            await client.connect()
+            await client.get_services()
+        print("⏳ Переход в режим индивидуального управления диодами...")
+        await enter_per_led_mode(client)
+        game_task = asyncio.create_task(game_loop(client))
+        return web.Response(text="Игра Тетрис запущена")
+      else:
+        return web.Response(text="Игра уже запущена")
     elif cmd == "Стоп":
         if game_task and not game_task.done():
             game_task.cancel()
