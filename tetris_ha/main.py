@@ -29,6 +29,7 @@ async def send_control_command(cmd):
     await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
 async def handle_mode(request):
+    global game_task  # 
     cmd = request.query.get("cmd")
     if cmd in CMD_MAP:
         try:
