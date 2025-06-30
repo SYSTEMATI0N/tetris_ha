@@ -30,9 +30,6 @@ async def ble_connect():
         await client.connect()
         await client.get_services()
 
-async def send_control_command(cmd):
-    await ble_connect()
-    await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
 async def handle_mode(request):
     global game_task  # 
@@ -88,13 +85,43 @@ def build_command_from_pixels(pixels):
     return commands
 
 async def send_commands(client, commands):
-    for cmd in commands:
-        print(f"📦 Отправка BLE пакета: {cmd.hex()}")
-        await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+    try:
+        if not client.is_connected:
+            await client.connect()
+            await client.get_services()
+        for cmd in commands:
+            print(f"📦 Отправка BLE пакета: {cmd.hex()}")
+            await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+    except Exception as e:
+        print(f"Ошибка при отправке BLE пакетов: {e}, пытаюсь переподключиться...")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+        await client.connect()
+        await client.get_services()
+        for cmd in commands:
+            await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+
 
 async def send_control_command(client, cmd):
-    print(f"Отправка команды: {cmd.hex()}")
-    await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+    try:
+        if not client.is_connected:
+            await client.connect()
+            await client.get_services()
+        await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+    except Exception as e:
+        print(f"Ошибка при отправке BLE команды: {e}, пытаюсь переподключиться...")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+        await client.connect()
+        await client.get_services()
+        await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+
 
 async def enter_per_led_mode(client):
     for cmd in INIT_CMDS:
