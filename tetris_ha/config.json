@@ -11,5 +11,10 @@
   "devices": ["/dev/snd", "/dev/bus/usb", "/dev/ttyAMA0", "/dev/ttyS0"],
   "privileged": ["SYS_RAWIO", "SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH"],
   "options": {},
-  "schema": {}
+  "schema": {},
+  "build": {
+    "args": {
+      "BUILD_FROM": "ghcr.io/hassio-addons/base:14.4.1"
+    }
+  }
 }
