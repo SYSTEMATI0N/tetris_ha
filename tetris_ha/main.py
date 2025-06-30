@@ -1,7 +1,7 @@
 import asyncio
 import random
 import signal
-from asyncio_mqtt import Client as MqttClient, MqttError
+from aiomqtt import Client as MqttClient, MqttError
 from bleak import BleakClient
 
 # Constants
