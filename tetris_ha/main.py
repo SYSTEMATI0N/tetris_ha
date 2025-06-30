@@ -39,17 +39,6 @@ async def handle_mode(request):
             return web.Response(status=500, text=f"Ошибка BLE: {e}")
     return web.Response(status=400, text="Неверная команда")
 
-app = web.Application()
-app.add_routes([web.get('/mode', handle_mode)])
-
-async def on_shutdown(app):
-    if client.is_connected:
-        await client.disconnect()
-
-app.on_shutdown.append(on_shutdown)
-
-web.run_app(app, host='0.0.0.0', port=8080)
-
 ROWS, COLS = 20, 20
 HALF_COLS = COLS // 2
 FPS = 4
@@ -337,6 +326,13 @@ async def handle_mode(request):
 async def start_app(client):
     app = web.Application()
     app['ble_client'] = client
+
+    async def on_shutdown(app):
+        if client.is_connected:
+            await client.disconnect()
+
+    app.on_shutdown.append(on_shutdown)
+    
     app.add_routes([web.get('/mode', handle_mode)])
     runner = web.AppRunner(app)
     await runner.setup()
