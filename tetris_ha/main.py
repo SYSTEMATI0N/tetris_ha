@@ -1,6 +1,6 @@
 import asyncio
-import signal
 import random
+import signal
 from bleak import BleakClient
 
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
@@ -8,8 +8,9 @@ CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
 
 ROWS, COLS = 20, 20
 HALF_COLS = COLS // 2
-
 FPS = 4
+
+stop_event = asyncio.Event()
 
 COLOR_PALETTE = [
     (20, 0, 80),
@@ -28,10 +29,8 @@ INIT_CMDS = [
     bytearray.fromhex("7e07640101e00000" + "ff" * 70 + "ef"),
 ]
 
-stop_event = asyncio.Event()
-
 def signal_handler():
-    print("⚠️ Получен сигнал завершения, завершаем игру...")
+    print("⚠️ Получен SIGTERM/SIGINT — остановка...")
     stop_event.set()
 
 def rgb_to_hex_str(rgb):
@@ -52,18 +51,14 @@ def build_command_from_pixels(pixels):
         i += 10
     return commands
 
-async def send_commands(client, commands, mtu=23):
-    max_payload = mtu - 3
+async def send_commands(client, commands):
     for cmd in commands:
-        for i in range(0, len(cmd), max_payload):
-            chunk = cmd[i:i+max_payload]
-            print(f"📦 Отправка BLE пакета: {chunk.hex()}")
-            await client.write_gatt_char(CHAR_UUID, chunk, response=False)
-            await asyncio.sleep(0.02)  # Лёгкая задержка между чанками
+        print(f"📦 Отправка BLE пакета: {cmd.hex()}")
+        await client.write_gatt_char(CHAR_UUID, cmd, response=False)
 
-async def enter_per_led_mode(client, mtu=23):
+async def enter_per_led_mode(client):
     for cmd in INIT_CMDS:
-        await send_commands(client, [cmd], mtu)
+        await send_commands(client, [cmd])
         await asyncio.sleep(0.05)
 
 TETROMINOS = {
@@ -97,7 +92,6 @@ class TetrisGame:
         self.piece_row = -2
         self.piece_col = self.cols_count // 2 - 2
         self.piece_color = random.choice(COLOR_PALETTE)
-
         for r, c in self.piece_blocks:
             nr = self.piece_row + r
             nc = self.piece_col + c
@@ -206,8 +200,7 @@ class TetrisGame:
             if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
                 led_matrix[nr][nc] = self.piece_color
 
-
-async def game_loop(client, mtu):
+async def game_loop(client):
     game1 = TetrisGame(0, HALF_COLS)
     game2 = None
     led_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
@@ -243,7 +236,7 @@ async def game_loop(client, mtu):
 
         if changed:
             commands = build_command_from_pixels(changed)
-            await send_commands(client, commands, mtu)
+            await send_commands(client, commands)
 
         await asyncio.sleep(1 / FPS)
 
@@ -257,16 +250,8 @@ async def run():
             print("❌ Не удалось подключиться.")
             return
         print("✅ Подключено.")
-
-        if hasattr(client, "_acquire_mtu"):
-            mtu = await client._acquire_mtu()
-            print(f"🔧 MTU установлен в: {mtu}")
-        else:
-            mtu = 23
-            print("⚠️ Метод _acquire_mtu() недоступен, используем MTU по умолчанию 23")
-
-        await enter_per_led_mode(client, mtu)
-        await game_loop(client, mtu)
+        await enter_per_led_mode(client)
+        await game_loop(client)
 
     print("🛑 Отключено от устройства.")
 
