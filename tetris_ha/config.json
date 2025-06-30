@@ -1,6 +1,6 @@
 {
   "name": "Tetris HA",
-  "version": "3.3.10.7exp",             
+  "version": "3.3.11.7exp",             
   "slug": "tetris_ha",
   "description": "Tetris game for LED curtain via BLE",
   "startup": "application",
