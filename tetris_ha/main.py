@@ -321,6 +321,7 @@ async def handle_mode(request):
         else:
             return web.Response(text="Игра не запущена")
     elif cmd in CMD_MAP:
+        print("⏳ Переход в режим глобального управления диодами...")
         if game_task and not game_task.done():
             game_task.cancel()
             try:
