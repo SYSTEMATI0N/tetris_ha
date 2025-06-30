@@ -261,10 +261,23 @@ async def run():
             print("❌ Не удалось подключиться.")
             return
         print("✅ Подключено.")
+
+        # Запрашиваем максимальный MTU (если доступно)
+        if hasattr(client, "_acquire_mtu"):
+            mtu = await client._acquire_mtu()
+            print(f"🔧 MTU установлен в: {mtu}")
+        else:
+            mtu = 23
+            print("⚠️ Метод _acquire_mtu() недоступен, используем MTU по умолчанию 23")
+
+        # Пропишем mtu в клиент для send_commands
+        client.mtu_size = mtu
+
         await enter_per_led_mode(client)
         await game_loop(client)
 
     print("🛑 Отключено от устройства.")
+
 
 if __name__ == '__main__':
     asyncio.run(run())
