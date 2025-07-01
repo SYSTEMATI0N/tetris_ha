@@ -49,7 +49,7 @@ HALF_COLS = COLS // 2
 FPS = 4
 TARGET_HEIGHT = ROWS / 2
 ALPHA, BETA, GAMMA = 1.0, 5.0, 2.0
-HELP_THRESHOLD = 3
+HELP_THRESHOLD = 16
 game_tasks: list[asyncio.Task] = []
 stop_event = asyncio.Event()
 
@@ -151,15 +151,13 @@ class TetrisGame:
         self.cols_count = cols_count
 
         import time
-        # 1) определяем base
         if seed is None:
             base = cols_start + int(time.time() * 1000)
         else:
             base = seed
-        # 2) инициализируем свой PRNG
         self.rng = random.Random(base)
 
-        self.field = [[False]*cols_count for _ in range(ROWS)]
+        self.field = [[False] * cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(cols_count)] for _ in range(ROWS)]
         self.piece_blocks = []
         self.piece_row = -2
@@ -170,7 +168,6 @@ class TetrisGame:
         self.target_blocks = None
         self.target_col = None
         self.spawn_new_piece()
-
 
     def can_place(self, blocks, row, col):
         for r, c in blocks:
@@ -197,10 +194,10 @@ class TetrisGame:
     def simulate(self, blocks, col):
         temp = [row[:] for row in self.field]
         row = -2
-        while self.can_place(blocks, row+1, col):
+        while self.can_place(blocks, row + 1, col):
             row += 1
         for r, c in blocks:
-            nr, nc = row+r, col+c
+            nr, nc = row + r, col + c
             if 0 <= nr < ROWS:
                 temp[nr][nc] = True
         heights, holes = [], 0
@@ -215,7 +212,7 @@ class TetrisGame:
                 elif seen:
                     holes += 1
             heights.append(h)
-        avg_h = sum(heights)/self.cols_count
+        avg_h = sum(heights) / self.cols_count
         return avg_h, holes, heights
 
     def max_height(self):
@@ -228,94 +225,110 @@ class TetrisGame:
         return m
 
     def spawn_new_piece(self):
-        # AI or random based on height
-        start_col = self.cols_count//2 - 1
-        # pick best via AI always
-        best_score, best = float('inf'), None
-        for shape in TETROMINOS.values():
-            for blocks in self.get_rotations(shape):
-                minc, maxc = min(c for _,c in blocks), max(c for _,c in blocks)
-                for col in range(-minc, self.cols_count-maxc):
-                    if not self.can_place(blocks, -2, col): continue
-                    avg_h, holes, heights = self.simulate(blocks, col)
-                    variance = max(heights)-min(heights)
-                    score = ALPHA*abs(avg_h-TARGET_HEIGHT) + BETA*holes + GAMMA*variance
-                    if score < best_score:
-                        best_score, best = score, (blocks, col)
-        if best:
-            self.piece_blocks, self.piece_col = best
+        start_col = self.cols_count // 2 - 1
+        if self.max_height() >= HELP_THRESHOLD:
+            # Use AI to find the best piece and position
+            best_score, best = float('inf'), None
+            for shape in TETROMINOS.values():
+                for blocks in self.get_rotations(shape):
+                    minc, maxc = min(c for _, c in blocks), max(c for _, c in blocks)
+                    for col in range(-minc, self.cols_count - maxc):
+                        if not self.can_place(blocks, -2, col):
+                            continue
+                        avg_h, holes, heights = self.simulate(blocks, col)
+                        variance = max(heights) - min(heights)
+                        score = ALPHA * abs(avg_h - TARGET_HEIGHT) + BETA * holes + GAMMA * variance
+                        if score < best_score:
+                            best_score, best = score, (blocks, col)
+            if best:
+                self.piece_blocks, self.piece_col = best
+            else:
+                self.game_over = True
+                return
         else:
-            self.piece_blocks = self.rng.choice(list(TETROMINOS.values()))
-            self.piece_col = start_col
+            # Randomly select a piece
+            choice = self.rng.choice(list(TETROMINOS.keys()))
+            blocks0 = TETROMINOS[choice]
+            if self.can_place(blocks0, -2, start_col):
+                self.piece_blocks = blocks0
+                self.piece_col = start_col
+            else:
+                self.spawn_new_piece()  # Recursive call to try another piece
+                return
+
         self.piece_row = -2
-        self.piece_color = random.choice(COLOR_PALETTE)
+        self.piece_color = self.rng.choice(COLOR_PALETTE)
         self.target_blocks = None
         self.target_col = None
         if not self.can_place(self.piece_blocks, self.piece_row, self.piece_col):
             self.game_over = True
 
     def update(self):
-        if self.game_over: return
-        # determine target
+        if self.game_over:
+            return
+        # Determine target
         if self.target_blocks is None:
             best_score, best = float('inf'), None
             for blocks in self.get_rotations(self.piece_blocks):
-                minc, maxc = min(c for _,c in blocks), max(c for _,c in blocks)
-                for col in range(-minc, self.cols_count-maxc):
-                    if not self.can_place(blocks, self.piece_row, col): continue
+                minc, maxc = min(c for _, c in blocks), max(c for _, c in blocks)
+                for col in range(-minc, self.cols_count - maxc):
+                    if not self.can_place(blocks, self.piece_row, col):
+                        continue
                     avg_h, holes, heights = self.simulate(blocks, col)
-                    variance = max(heights)-min(heights)
-                    score = ALPHA*abs(avg_h-TARGET_HEIGHT) + BETA*holes + GAMMA*variance
+                    variance = max(heights) - min(heights)
+                    score = ALPHA * abs(avg_h - TARGET_HEIGHT) + BETA * holes + GAMMA * variance
                     if score < best_score:
                         best_score, best = score, (blocks, col)
             self.target_blocks, self.target_col = best if best else (self.piece_blocks, self.piece_col)
-        # move towards target
-        if self.piece_col < self.target_col and self.can_place(self.piece_blocks, self.piece_row, self.piece_col+1):
+        # Move towards target
+        if self.piece_col < self.target_col and self.can_place(self.piece_blocks, self.piece_row, self.piece_col + 1):
             self.piece_col += 1
-        elif self.piece_col > self.target_col and self.can_place(self.piece_blocks, self.piece_row, self.piece_col-1):
+        elif self.piece_col > self.target_col and self.can_place(self.piece_blocks, self.piece_row, self.piece_col - 1):
             self.piece_col -= 1
-        # rotate if possible
-        if self.piece_blocks != self.target_blocks and self.piece_row >= 0:
+        # Rotate if possible, only when piece_row >= 3
+        if self.piece_blocks != self.target_blocks and self.piece_row >= 3:
             rots = self.get_rotations(self.piece_blocks)
             if self.target_blocks in rots:
-                next_block = rots[(rots.index(self.piece_blocks)+1)%len(rots)]
+                next_block = rots[(rots.index(self.piece_blocks) + 1) % len(rots)]
                 if self.can_place(next_block, self.piece_row, self.piece_col):
                     self.piece_blocks = next_block
                     return
-        # fall or lock
-        if self.can_place(self.piece_blocks, self.piece_row+1, self.piece_col):
+        # Fall or lock
+        if self.can_place(self.piece_blocks, self.piece_row + 1, self.piece_col):
             self.piece_row += 1
         else:
             self.lock_piece()
 
     def lock_piece(self):
-        for r,c in self.piece_blocks:
-            nr, nc = self.piece_row+r, self.piece_col+c
+        for r, c in self.piece_blocks:
+            nr, nc = self.piece_row + r, self.piece_col + c
             if 0 <= nr < ROWS:
                 self.field[nr][nc] = True
                 self.color_field[nr][nc] = self.piece_color
         self.locked_pieces_count += 1
-        # clear lines
+        # Clear lines
         new_f, new_c, cleared = [], [], 0
         for r in range(ROWS):
-            if all(self.field[r]): cleared += 1
+            if all(self.field[r]):
+                cleared += 1
             else:
-                new_f.append(self.field[r]); new_c.append(self.color_field[r])
+                new_f.append(self.field[r])
+                new_c.append(self.color_field[r])
         for _ in range(cleared):
-            new_f.insert(0, [False]*self.cols_count)
-            new_c.insert(0, [COLOR_BLACK]*self.cols_count)
+            new_f.insert(0, [False] * self.cols_count)
+            new_c.insert(0, [COLOR_BLACK] * self.cols_count)
         self.field, self.color_field = new_f, new_c
         self.spawn_new_piece()
 
     def render(self, led_matrix):
-        # draw field
+        # Draw field
         for r in range(ROWS):
             for c in range(self.cols_count):
-                led_matrix[r+1][c+self.cols_start+1] = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
-        # draw active piece
-        for r,c in self.piece_blocks:
-            nr, nc = self.piece_row+r+1, self.piece_col+c+self.cols_start+1
-            if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
+                led_matrix[r + 1][c + self.cols_start + 1] = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
+        # Draw active piece
+        for r, c in self.piece_blocks:
+            nr, nc = self.piece_row + r + 1, self.piece_col + c + self.cols_start + 1
+            if 0 <= nr < ROWS + 2 and 0 <= nc < COLS + 2:
                 led_matrix[nr][nc] = self.piece_color
 # -----------------------
 async def single_game_loop(client, cols_start, cols_count, seed=None):
@@ -467,7 +480,7 @@ async def shutdown(loop, client):
 async def main():
     loop = asyncio.get_running_loop()
     # ловим SIGTERM
-    loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown(loop, client)))
+   # loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown(loop, client)))
 
     async with BleakClient(DEVICE_ADDRESS) as client:
         if not client.is_connected:
