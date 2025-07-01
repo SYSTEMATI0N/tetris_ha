@@ -149,9 +149,16 @@ class TetrisGame:
     def __init__(self, cols_start, cols_count, seed=None):
         self.cols_start = cols_start
         self.cols_count = cols_count
+
         import time
+        # 1) определяем base
+        if seed is None:
+            base = cols_start + int(time.time() * 1000)
+        else:
+            base = seed
+        # 2) инициализируем свой PRNG
         self.rng = random.Random(base)
-        base = seed if seed is not None else cols_start + int(time.time()*1000)
+
         self.field = [[False]*cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(cols_count)] for _ in range(ROWS)]
         self.piece_blocks = []
@@ -163,6 +170,7 @@ class TetrisGame:
         self.target_blocks = None
         self.target_col = None
         self.spawn_new_piece()
+
 
     def can_place(self, blocks, row, col):
         for r, c in blocks:
@@ -315,7 +323,7 @@ async def single_game_loop(client, cols_start, cols_count, seed=None):
     Один цикл игры Тетрис на диапазоне колонок [cols_start, cols_start+cols_count).
     Рендерит и отправляет только своё поле.
     """
-    game = TetrisGame(cols_start, cols_count)
+    game = TetrisGame(cols_start, cols_count, seed=seed)
     # матрица с границами: +2 по строкам и столбцам
     led_matrix = [[COLOR_BLACK]*(COLS+2) for _ in range(ROWS+2)]
     prev_matrix = [row[:] for row in led_matrix]
