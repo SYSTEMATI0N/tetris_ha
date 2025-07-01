@@ -44,12 +44,12 @@ async def handle_mode(request):
             return web.Response(status=500, text=f"Ошибка BLE: {e}")
     return web.Response(status=400, text="Неверная команда")
 
-ROWS, COLS = 20, 20
+ROWS, COLS = 18, 20
 HALF_COLS = COLS // 2
-FPS = 4
+FPS = 3
 TARGET_HEIGHT = ROWS / 2
 ALPHA, BETA, GAMMA = 1.0, 5.0, 2.0
-HELP_THRESHOLD = 16
+HELP_THRESHOLD = 15
 game_tasks: list[asyncio.Task] = []
 stop_event = asyncio.Event()
 
