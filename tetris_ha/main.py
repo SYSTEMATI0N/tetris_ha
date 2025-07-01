@@ -300,7 +300,7 @@ class TetrisGame:
                 next_block = rots[(rots.index(self.piece_blocks) + 1) % len(rots)]
                 if self.can_place(next_block, self.piece_row, self.piece_col):
                     self.piece_blocks = next_block
-                    return
+                    
         # Fall or lock
         if self.can_place(self.piece_blocks, self.piece_row + 1, self.piece_col):
             self.piece_row += 1
