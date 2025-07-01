@@ -49,7 +49,7 @@ HALF_COLS = COLS // 2
 FPS = 4
 TARGET_HEIGHT = ROWS / 2
 ALPHA, BETA, GAMMA = 1.0, 5.0, 2.0
-HELP_THRESHOLD = 16
+HELP_THRESHOLD = 3
 game_tasks: list[asyncio.Task] = []
 stop_event = asyncio.Event()
 
