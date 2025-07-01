@@ -483,8 +483,8 @@ async def handle_mode(request):
 
     # --- 4) Неизвестный запрос ---
     else:
-        return web.Response(text=f"Неизвестная команда Prohibited
-
+        return web.Response(text=f"Неизвестная команда: {cmd}", status=400)
+        
 async def start_app(client):
     app = web.Application()
     app['ble_client'] = client
