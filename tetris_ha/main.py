@@ -52,6 +52,7 @@ ALPHA, BETA, GAMMA = 1.0, 5.0, 2.0
 HELP_THRESHOLD = 15
 game_tasks: list[asyncio.Task] = []
 stop_event = asyncio.Event()
+reconnected = False
 
 COLOR_PALETTE = [
     (10, 0, 80),
@@ -114,6 +115,7 @@ async def connection_monitor(client, interval=5):
                 await client.connect()
                 await client.get_services()
                 print("✅ Переподключено к BLE.")
+                reconnected = True
             except Exception as e:
                 print(f"❌ Не удалось переподключиться: {e}")
         await asyncio.sleep(interval)
@@ -338,47 +340,45 @@ class TetrisGame:
                 led_matrix[nr][nc] = self.piece_color
 # -----------------------
 async def single_game_loop(client, cols_start, cols_count, seed=None):
-    """
-    Один цикл игры Тетрис на диапазоне колонок [cols_start, cols_start+cols_count).
-    Рендерит и отправляет только своё поле.
-    """
     game = TetrisGame(cols_start, cols_count, seed=seed)
-    # матрица с границами: +2 по строкам и столбцам
     led_matrix = [[COLOR_BLACK]*(COLS+2) for _ in range(ROWS+2)]
     prev_matrix = [row[:] for row in led_matrix]
-
     try:
         while True:
             game.update()
-
-            # очистка матрицы перед рендером
             for r in range(ROWS+2):
                 for c in range(COLS+2):
                     led_matrix[r][c] = COLOR_BLACK
-
-            # отрисовка только своего игрового поля
             game.render(led_matrix)
-
-            # собираем отличия от prev_matrix
             changed = []
             for r in range(1, ROWS+1):
                 for c in range(1, COLS+1):
                     if led_matrix[r][c] != prev_matrix[r][c]:
-                        # поворот координат под вашу штору
                         rotated_row = c
                         rotated_col = ROWS - r + 1
                         changed.append((rotated_row, rotated_col, led_matrix[r][c]))
             prev_matrix = [row[:] for row in led_matrix]
-
-            # отправляем пакеты, если что-то изменилось
-            if changed:
-                cmds = build_command_from_pixels(changed)
+            # отправляем пакеты
+            if reconnected:
+                # Отправляем полное состояние матрицы
+                full_changed = []
+                for r in range(1, ROWS+1):
+                    for c in range(1, COLS+1):
+                        rotated_row = c
+                        rotated_col = ROWS - r + 1
+                        full_changed.append((rotated_row, rotated_col, led_matrix[r][c]))
+                cmds = build_command_from_pixels(full_changed)
                 await send_commands(client, cmds)
+                global reconnected
+                reconnected = False
+                prev_matrix = [row[:] for row in led_matrix]  # Обновляем prev_matrix
+            elif changed:
+                cmds = build_command_from_pixels(changed)
+                await send_commands(client
 
+, cmds)
             await asyncio.sleep(1 / FPS)
-
     except asyncio.CancelledError:
-        # при отмене просто выходим из функции
         return
 
 
