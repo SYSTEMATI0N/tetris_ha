@@ -153,7 +153,7 @@ class TetrisGame:
     def __init__(self, cols_start, cols_count):
         self.cols_start = cols_start
         self.cols_count = cols_count
-        self.field = [[False]*cols_count for _ in range(ROWS)]
+        self.field = [[False] * cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(cols_count)] for _ in range(ROWS)]
         self.current_piece = None
         self.piece_row = -2
@@ -162,6 +162,9 @@ class TetrisGame:
         self.piece_color = COLOR_PALETTE[0]
         self.game_over = False
         self.locked_pieces_count = 0
+        # Для AI‑логики
+        self.target_col = None
+        self.target_blocks = None
         self.spawn_new_piece()
 
     def spawn_new_piece(self):
@@ -170,17 +173,19 @@ class TetrisGame:
         self.piece_row = -2
         self.piece_col = self.cols_count // 2 - 2
         self.piece_color = random.choice(COLOR_PALETTE)
+        # сброс цели
+        self.target_blocks = None
+        self.target_col = None
+        # проверка Game Over
         for r, c in self.piece_blocks:
-            nr = self.piece_row + r
-            nc = self.piece_col + c
+            nr, nc = self.piece_row + r, self.piece_col + c
             if 0 <= nr < ROWS and self.field[nr][nc]:
                 self.game_over = True
-                print(f"💀 Game Over на поле начиная с колонки {self.cols_start}! Перезапуск...")
                 self.reset_game()
                 break
 
     def reset_game(self):
-        self.field = [[False]*self.cols_count for _ in range(ROWS)]
+        self.field = [[False] * self.cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(self.cols_count)] for _ in range(ROWS)]
         self.game_over = False
         self.locked_pieces_count = 0
@@ -188,20 +193,19 @@ class TetrisGame:
 
     def can_move(self, dr, dc):
         for r, c in self.piece_blocks:
-            nr = self.piece_row + r + dr
-            nc = self.piece_col + c + dc
-            if nr >= ROWS or nc < 0 or nc >= self.cols_count:
+            nr, nc = self.piece_row + r + dr, self.piece_col + c + dc
+            if nr >= ROWS or nc < 0 or nc >= self.cols_count or nr < -2:
                 return False
             if nr >= 0 and self.field[nr][nc]:
-                return False
-            if nr < -2:
                 return False
         return True
 
     def lock_piece(self):
+        # сброс цели
+        self.target_blocks = None
+        self.target_col = None
         for r, c in self.piece_blocks:
-            nr = self.piece_row + r
-            nc = self.piece_col + c
+            nr, nc = self.piece_row + r, self.piece_col + c
             if 0 <= nr < ROWS and 0 <= nc < self.cols_count:
                 self.field[nr][nc] = True
                 self.color_field[nr][nc] = self.piece_color
@@ -210,73 +214,111 @@ class TetrisGame:
         self.spawn_new_piece()
 
     def clear_lines(self):
-        new_field = []
-        new_color_field = []
-        lines_cleared = 0
+        new_field, new_color_field = [], []
         for row_idx in range(ROWS):
-            if all(self.field[row_idx]):
-                lines_cleared += 1
-            else:
+            if not all(self.field[row_idx]):
                 new_field.append(self.field[row_idx])
                 new_color_field.append(self.color_field[row_idx])
-        for _ in range(lines_cleared):
-            new_field.insert(0, [False]*self.cols_count)
-            new_color_field.insert(0, [COLOR_BLACK]*self.cols_count)
-        self.field = new_field
-        self.color_field = new_color_field
+        for _ in range(ROWS - len(new_field)):
+            new_field.insert(0, [False] * self.cols_count)
+            new_color_field.insert(0, [COLOR_BLACK] * self.cols_count)
+        self.field, self.color_field = new_field, new_color_field
 
     def rotate_piece(self):
         if self.current_piece == 'O':
             return
         new_blocks = [(-c, r) for r, c in self.piece_blocks]
         for r, c in new_blocks:
-            nr = self.piece_row + r
-            nc = self.piece_col + c
-            if nr < -2 or nr >= ROWS or nc < 0 or nc >= self.cols_count:
-                return
-            if nr >= 0 and self.field[nr][nc]:
+            nr, nc = self.piece_row + r, self.piece_col + c
+            if nr < -2 or nr >= ROWS or nc < 0 or nc >= self.cols_count or (nr >= 0 and self.field[nr][nc]):
                 return
         self.piece_blocks = new_blocks
+
+    def get_rotations(self, blocks):
+        seen, rots = set(), []
+        curr = list(blocks)
+        for _ in range(4):
+            norm = tuple(sorted(curr))
+            if norm in seen:
+                break
+            seen.add(norm)
+            rots.append(list(curr))
+            curr = [(-c, r) for r, c in curr]
+        return rots
+
+    def simulate(self, blocks, col):
+        temp = [row[:] for row in self.field]
+        row = -2
+        while self.can_move(blocks, row + 1, col):
+            row += 1
+        for r, c in blocks:
+            nr, nc = row + r, col + c
+            if 0 <= nr < ROWS:
+                temp[nr][nc] = True
+        heights, holes = [], 0
+        for cc in range(self.cols_count):
+            seen_block, h = False, 0
+            for rr in range(ROWS):
+                if temp[rr][cc]:
+                    if not seen_block:
+                        h, seen_block = ROWS - rr, True
+                elif seen_block:
+                    holes += 1
+            heights.append(h)
+        return sum(heights) / self.cols_count, holes, heights
 
     def update(self):
         if self.game_over:
             return
 
-        left_fill = self.column_fill(self.piece_col - 1) if self.piece_col > 0 else 1000
-        right_fill = self.column_fill(self.piece_col + max(c for _, c in self.piece_blocks) + 1) if (self.piece_col + max(c for _, c in self.piece_blocks) + 1) < self.cols_count else 1000
+        # 1) Подбор цели
+        if self.target_blocks is None:
+            best_score, best = float('inf'), None
+            for base in TETROMINOS.values():
+                for blocks in self.get_rotations(base):
+                    minc, maxc = min(c for _, c in blocks), max(c for _, c in blocks)
+                    for col in range(-minc, self.cols_count - maxc):
+                        if not self.can_move(blocks, self.piece_row, col):
+                            continue
+                        avg_h, holes, heights = self.simulate(blocks, col)
+                        var = max(heights) - min(heights)
+                        score = ALPHA * abs(avg_h - TARGET_HEIGHT) + BETA * holes + GAMMA * var
+                        if score < best_score:
+                            best_score, best = score, (blocks, col)
+            if best:
+                self.target_blocks, self.target_col = best
 
-        if left_fill < right_fill and self.can_move(0, -1):
-            self.piece_col -= 1
-        elif right_fill < left_fill and self.can_move(0, 1):
-            self.piece_col += 1
+        # 2) Гориз. движение
+        if self.target_col is not None:
+            if self.piece_col < self.target_col and self.can_move(0, 1):
+                self.piece_col += 1
+            elif self.piece_col > self.target_col and self.can_move(0, -1):
+                self.piece_col -= 1
 
-        if random.random() < 0.3:
-            old_blocks = self.piece_blocks[:]
-            self.rotate_piece()
-            if not self.can_move(0, 0):
-                self.piece_blocks = old_blocks
+        # 3) Поворот
+        if self.target_blocks is not None and self.piece_blocks != self.target_blocks:
+            rots = self.get_rotations(self.piece_blocks)
+            if self.target_blocks in rots:
+                idx = rots.index(self.piece_blocks)
+                candidate = rots[(idx + 1) % len(rots)]
+                if self.can_move(candidate, 0, 0):
+                    self.piece_blocks = candidate
 
+        # 4) Падение
         if self.can_move(1, 0):
             self.piece_row += 1
         else:
             self.lock_piece()
 
-    def column_fill(self, col):
-        if col < 0 or col >= self.cols_count:
-            return 1000
-        return sum(1 for r in range(ROWS) if self.field[r][col])
-
     def render(self, led_matrix):
         for r in range(ROWS):
             for c in range(self.cols_count):
-                color = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
-                led_matrix[r+1][c + self.cols_start + 1] = color
-
+                led_matrix[r+1][c+self.cols_start+1] = self.color_field[r][c] if self.field[r][c] else COLOR_BLACK
         for r, c in self.piece_blocks:
-            nr = self.piece_row + r + 1
-            nc = self.piece_col + c + self.cols_start + 1
+            nr, nc = self.piece_row+r+1, self.piece_col+c+self.cols_start+1
             if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
                 led_matrix[nr][nc] = self.piece_color
+
 # -----------------------
 
 # Game loop и управление задачей игры
