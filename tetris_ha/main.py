@@ -89,43 +89,49 @@ def build_command_from_pixels(pixels):
         i += 10
     return commands
 
-async def send_commands(client, commands):
-    try:
-        if not client.is_connected:
-            await client.connect()
-            await client.get_services()
-        for cmd in commands:
-            print(f"📦 Отправка BLE пакета: {cmd.hex()}")
-            await client.write_gatt_char(CHAR_UUID, cmd, response=False)
-    except Exception as e:
-        print(f"Ошибка при отправке BLE пакетов: {e}, пытаюсь переподключиться...")
+async def send_commands(client, commands, retries=3, delay=1):
+    for attempt in range(retries):
         try:
-            await client.disconnect()
-        except Exception:
-            pass
-        await asyncio.sleep(1)
-        await client.connect()
-        await client.get_services()
-        for cmd in commands:
-            await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+            if not client.is_connected:
+                await client.connect()
+                await client.get_services()
+            for cmd in commands:
+                print(f"📦 Отправка BLE пакета: {cmd.hex()}")
+                await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+            return  # Успешно отправлено
+        except Exception as e:
+            print(f"Ошибка при отправке BLE пакетов (попытка {attempt+1}/{retries}): {e}")
+            if attempt < retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                raise  # Если все попытки исчерпаны, поднимаем исключение
 
-
-async def send_control_command(client, cmd):
-    try:
+async def connection_monitor(client, interval=5):
+    while True:
         if not client.is_connected:
-            await client.connect()
-            await client.get_services()
-        await client.write_gatt_char(CHAR_UUID, cmd, response=False)
-    except Exception as e:
-        print(f"Ошибка при отправке BLE команды: {e}, пытаюсь переподключиться...")
+            print("🔄 Потеряно соединение, пытаюсь переподключиться...")
+            try:
+                await client.connect()
+                await client.get_services()
+                print("✅ Переподключено к BLE.")
+            except Exception as e:
+                print(f"❌ Не удалось переподключиться: {e}")
+        await asyncio.sleep(interval)
+        
+async def send_control_command(client, cmd, retries=3, delay=1):
+    for attempt in range(retries):
         try:
-            await client.disconnect()
-        except Exception:
-            pass
-        await asyncio.sleep(1)
-        await client.connect()
-        await client.get_services()
-        await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+            if not client.is_connected:
+                await client.connect()
+                await client.get_services()
+            await client.write_gatt_char(CHAR_UUID, cmd, response=False)
+            return  # Успешно отправлено
+        except Exception as e:
+            print(f"Ошибка при отправке BLE команды (попытка {attempt+1}/{retries}): {e}")
+            if attempt < retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                raise  # Если все попытки исчерпаны, поднимаем исключение
 
 
 async def enter_per_led_mode(client):
@@ -487,8 +493,18 @@ async def main():
             print("❌ Не удалось подключиться к BLE.")
             return
         print("✅ Подключено к BLE.")
+        
+        # Запускаем монитор соединения
+        monitor_task = asyncio.create_task(connection_monitor(client))
+        
         await start_app(client)
+        
+        # Ждем завершения
         await asyncio.Event().wait()
-
+        
+        # Отменяем монитор при выходе
+        monitor_task.cancel()
+        await monitor_task
+        
 if __name__ == '__main__':
     asyncio.run(main())
