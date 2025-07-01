@@ -91,11 +91,14 @@ def build_command_from_pixels(pixels):
     return commands
 
 async def send_commands(client, commands, retries=3, delay=1):
+    global client  # Обновляем глобальный client
     for attempt in range(retries):
         try:
             if not client.is_connected:
+                print("🔄 Попытка переподключения в send_commands...")
+                await client.disconnect()  # Явно разрываем старое соединение
+                client = BleakClient(DEVICE_ADDRESS)  # Новый клиент
                 await client.connect()
-                await client.get_services()
             for cmd in commands:
                 print(f"📦 Отправка BLE пакета: {cmd.hex()}")
                 await client.write_gatt_char(CHAR_UUID, cmd, response=False)
@@ -106,15 +109,16 @@ async def send_commands(client, commands, retries=3, delay=1):
                 await asyncio.sleep(delay)
             else:
                 raise  # Если все попытки исчерпаны, поднимаем исключение
-
 async def connection_monitor(client, interval=5):
     while True:
         if not client.is_connected:
             print("🔄 Потеряно соединение, пытаюсь переподключиться...")
             try:
+                await client.disconnect()  # Явно разрываем старое соединение
+                client = BleakClient(DEVICE_ADDRESS)  # Создаём новый объект клиента
                 await client.connect()
-                await client.get_services()
                 print("✅ Переподключено к BLE.")
+                global reconnected
                 reconnected = True
             except Exception as e:
                 print(f"❌ Не удалось переподключиться: {e}")
@@ -345,7 +349,6 @@ async def single_game_loop(client, cols_start, cols_count, seed=None):
     Рендерит и отправляет только своё поле.
     """
     game = TetrisGame(cols_start, cols_count, seed=seed)
-    # матрица с границами: +2 по строкам и столбцам
     led_matrix = [[COLOR_BLACK]*(COLS+2) for _ in range(ROWS+2)]
     prev_matrix = [row[:] for row in led_matrix]
 
@@ -366,43 +369,44 @@ async def single_game_loop(client, cols_start, cols_count, seed=None):
             for r in range(1, ROWS+1):
                 for c in range(1, COLS+1):
                     if led_matrix[r][c] != prev_matrix[r][c]:
-                        # поворот координат под вашу штору
                         rotated_row = c
                         rotated_col = ROWS - r + 1
                         changed.append((rotated_row, rotated_col, led_matrix[r][c]))
             prev_matrix = [row[:] for row in led_matrix]
 
             # отправляем пакеты
-            global reconnected  # Объявляем до использования
-            if reconnected:
-                print("📦 Отправка полного состояния шторы")
-                await enter_per_led_mode(client)  # Инициализация шторы
-                # Отправляем полное состояние матрицы
-                full_changed = []
-                for r in range(1, ROWS+1):
-                    for c in range(1, COLS+1):
-                        rotated_row = c
-                        rotated_col = ROWS - r + 1
-                        full_changed.append((rotated_row, rotated_col, led_matrix[r][c]))
-                cmds = build_command_from_pixels(full_changed)
-                await send_commands(client, cmds)
-                reconnected = False
-                prev_matrix = [row[:] for row in led_matrix]  # Обновляем prev_matrix
-            elif changed:
-                print(f"📦 Отправка {len(changed)} изменённых пикселей")
-                cmds = build_command_from_pixels(changed)
-                await send_commands(client, cmds)
+            global reconnected
+            try:
+                if reconnected:
+                    print("📦 Отправка полного состояния шторы")
+                    await enter_per_led_mode(client)  # Инициализация шторы
+                    # Отправляем полное состояние матрицы
+                    full_changed = []
+                    for r in range(1, ROWS+1):
+                        for c in range(1, COLS+1):
+                            rotated_row = c
+                            rotated_col = ROWS - r + 1
+                            full_changed.append((rotated_row, rotated_col, led_matrix[r][c]))
+                    cmds = build_command_from_pixels(full_changed)
+                    await send_commands(client, cmds)
+                    reconnected = False
+                    prev_matrix = [row[:] for row in led_matrix]  # Обновляем prev_matrix
+                elif changed:
+                    print(f"📦 Отправка {len(changed)} изменённых пикселей")
+                    cmds = build_command_from_pixels(changed)
+                    await send_commands(client, cmds)
+            except Exception as e:
+                print(f"⚠️ Ошибка при отправке данных: {e}")
+                # Не завершаем задачу, продолжаем цикл
+                await asyncio.sleep(1)  # Ждём перед следующей попыткой
 
             await asyncio.sleep(1 / FPS)
 
     except asyncio.CancelledError:
         return
-
-
 # -----------------------
 
 
-# Обработчик HTTP-запроса
 async def handle_mode(request):
     """
     HTTP API:
@@ -416,6 +420,7 @@ async def handle_mode(request):
     cmd = cmd.strip()
     print(f"HTTP: получена команда: {cmd}")
 
+    global client, reconnected
     client = request.app['ble_client']
 
     # --- 1) Запуск игр Тетрис ---
@@ -425,10 +430,15 @@ async def handle_mode(request):
             return web.Response(text="Игра уже запущена")
 
         # готовим LED‑штору
-        if not client.is_connected:
-            await client.connect()
-            await client.get_services()
-        await enter_per_led_mode(client)
+        try:
+            if not client.is_connected:
+                await client.disconnect()
+                client = BleakClient(DEVICE_ADDRESS)
+                await client.connect()
+            await enter_per_led_mode(client)
+            reconnected = True  # Устанавливаем для отправки полного состояния
+        except Exception as e:
+            return web.Response(status=500, text=f"Ошибка BLE при инициализации: {e}")
 
         # создаём две параллельные игры: левая и правая половины
         task1 = asyncio.create_task(single_game_loop(client, 0, HALF_COLS, seed=1))
@@ -461,16 +471,19 @@ async def handle_mode(request):
             game_tasks.clear()
 
         # шлём команду на всю штору
-        if not client.is_connected:
-            await client.connect()
-            await client.get_services()
-        await send_control_command(client, CMD_MAP[cmd])
-
-        return web.Response(text=f"Команда {cmd} отправлена")
+        try:
+            if not client.is_connected:
+                await client.disconnect()
+                client = BleakClient(DEVICE_ADDRESS)
+                await client.connect()
+            await send_control_command(client, CMD_MAP[cmd])
+            return web.Response(text=f"Команда {cmd} отправлена")
+        except Exception as e:
+            return web.Response(status=500, text=f"Ошибка BLE: {e}")
 
     # --- 4) Неизвестный запрос ---
     else:
-        return web.Response(text=f"Неизвестная команда: {cmd}", status=400)
+        return web.Response(text=f"Неизвестная команда Prohibited
 
 async def start_app(client):
     app = web.Application()
