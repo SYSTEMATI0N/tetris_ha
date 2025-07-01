@@ -1,5 +1,6 @@
 import asyncio
 import random
+from bleak import BleakClient
 from aiohttp import web
 
 # Константы
