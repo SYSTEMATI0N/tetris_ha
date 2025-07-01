@@ -91,7 +91,6 @@ def build_command_from_pixels(pixels):
     return commands
 
 async def send_commands(client, commands, retries=3, delay=1):
-    global client  # Обновляем глобальный client
     for attempt in range(retries):
         try:
             if not client.is_connected:
@@ -102,42 +101,47 @@ async def send_commands(client, commands, retries=3, delay=1):
             for cmd in commands:
                 print(f"📦 Отправка BLE пакета: {cmd.hex()}")
                 await client.write_gatt_char(CHAR_UUID, cmd, response=False)
-            return  # Успешно отправлено
+            return client  # Возвращаем клиент (новый или старый)
         except Exception as e:
             print(f"Ошибка при отправке BLE пакетов (попытка {attempt+1}/{retries}): {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
             else:
                 raise  # Если все попытки исчерпаны, поднимаем исключение
+    return client  # Возвращаем клиент даже в случае ошибки
+    
 async def connection_monitor(client, interval=5):
+    global reconnected
     while True:
         if not client.is_connected:
             print("🔄 Потеряно соединение, пытаюсь переподключиться...")
             try:
                 await client.disconnect()  # Явно разрываем старое соединение
-                client = BleakClient(DEVICE_ADDRESS)  # Создаём новый объект клиента
+                client = BleakClient(DEVICE_ADDRESS)  # Новый клиент
                 await client.connect()
                 print("✅ Переподключено к BLE.")
-                global reconnected
                 reconnected = True
             except Exception as e:
                 print(f"❌ Не удалось переподключиться: {e}")
         await asyncio.sleep(interval)
+    return client  # Возвращаем client для обновления
         
 async def send_control_command(client, cmd, retries=3, delay=1):
     for attempt in range(retries):
         try:
             if not client.is_connected:
+                await client.disconnect()
+                client = BleakClient(DEVICE_ADDRESS)
                 await client.connect()
-                await client.get_services()
             await client.write_gatt_char(CHAR_UUID, cmd, response=False)
-            return  # Успешно отправлено
+            return client  # Возвращаем клиент
         except Exception as e:
             print(f"Ошибка при отправке BLE команды (попытка {attempt+1}/{retries}): {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
             else:
                 raise  # Если все попытки исчерпаны, поднимаем исключение
+    return client
 
 
 async def enter_per_led_mode(client):
@@ -388,13 +392,13 @@ async def single_game_loop(client, cols_start, cols_count, seed=None):
                             rotated_col = ROWS - r + 1
                             full_changed.append((rotated_row, rotated_col, led_matrix[r][c]))
                     cmds = build_command_from_pixels(full_changed)
-                    await send_commands(client, cmds)
+                    client = await send_commands(client, cmds)  # Обновляем client
                     reconnected = False
                     prev_matrix = [row[:] for row in led_matrix]  # Обновляем prev_matrix
                 elif changed:
                     print(f"📦 Отправка {len(changed)} изменённых пикселей")
                     cmds = build_command_from_pixels(changed)
-                    await send_commands(client, cmds)
+                    client = await send_commands(client, cmds)  # Обновляем client
             except Exception as e:
                 print(f"⚠️ Ошибка при отправке данных: {e}")
                 # Не завершаем задачу, продолжаем цикл
@@ -404,6 +408,7 @@ async def single_game_loop(client, cols_start, cols_count, seed=None):
 
     except asyncio.CancelledError:
         return
+    return client  # Возвращаем client для обновления в вызывающем коде
 # -----------------------
 
 
@@ -416,7 +421,9 @@ async def handle_mode(request):
     """
     cmd = request.rel_url.query.get("cmd")
     if cmd is None:
-        return web.Response(text="Параметр cmd обязателен", status=400)
+       
+
+ return web.Response(text="Параметр cmd обязателен", status=400)
     cmd = cmd.strip()
     print(f"HTTP: получена команда: {cmd}")
 
@@ -446,6 +453,15 @@ async def handle_mode(request):
         game_tasks.clear()
         game_tasks.extend([task1, task2])
 
+        # Обновляем глобальный client из задач
+        async def update_client_from_tasks():
+            global client
+            results = await asyncio.gather(task1, task2, return_exceptions=True)
+            for result in results:
+                if isinstance(result, BleakClient):
+                    client = result
+
+        asyncio.create_task(update_client_from_tasks())
         return web.Response(text="Две игры Тетрис запущены")
 
     # --- 2) Остановка всех игр ---
@@ -484,23 +500,6 @@ async def handle_mode(request):
     # --- 4) Неизвестный запрос ---
     else:
         return web.Response(text=f"Неизвестная команда: {cmd}", status=400)
-        
-async def start_app(client):
-    app = web.Application()
-    app['ble_client'] = client
-
-    async def on_shutdown(app):
-        if client.is_connected:
-            await client.disconnect()
-
-    app.on_shutdown.append(on_shutdown)
-    
-    app.add_routes([web.get('/mode', handle_mode)])
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    print("🚀 HTTP сервер запущен на http://0.0.0.0:8080")
 
 async def shutdown(loop, client):
     # отменяем все таски игр
