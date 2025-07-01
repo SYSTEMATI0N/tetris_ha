@@ -480,7 +480,7 @@ async def shutdown(loop, client):
 async def main():
     loop = asyncio.get_running_loop()
     # ловим SIGTERM
-   # loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown(loop, client)))
+    loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown(loop, client)))
 
     async with BleakClient(DEVICE_ADDRESS) as client:
         if not client.is_connected:
