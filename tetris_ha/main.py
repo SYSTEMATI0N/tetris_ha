@@ -3,6 +3,7 @@ from aiohttp import web
 from bleak import BleakClient
 import random
 import copy
+import signal
 
 DEVICE_ADDRESS = "BE:16:FA:00:03:7A"
 CHAR_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
@@ -43,13 +44,13 @@ async def handle_mode(request):
             return web.Response(status=500, text=f"Ошибка BLE: {e}")
     return web.Response(status=400, text="Неверная команда")
 
-ROWS, COLS = 20, 10
+ROWS, COLS = 20, 20
 HALF_COLS = COLS // 2
 FPS = 4
 TARGET_HEIGHT = ROWS / 2
 ALPHA, BETA, GAMMA = 1.0, 5.0, 2.0
 HELP_THRESHOLD = 16
-
+game_tasks: list[asyncio.Task] = []
 stop_event = asyncio.Event()
 
 COLOR_PALETTE = [
@@ -306,50 +307,62 @@ class TetrisGame:
             if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
                 led_matrix[nr][nc] = self.piece_color
 # -----------------------
-
-# Game loop и управление задачей игры
-game_task = None
-
-async def game_loop(client):
-    game1 = TetrisGame(0, HALF_COLS)
-    game2 = None
-    led_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
-    prev_matrix = [[COLOR_BLACK for _ in range(COLS+2)] for _ in range(ROWS+2)]
+async def single_game_loop(client, cols_start, cols_count):
+    """
+    Один цикл игры Тетрис на диапазоне колонок [cols_start, cols_start+cols_count).
+    Рендерит и отправляет только своё поле.
+    """
+    game = TetrisGame(cols_start, cols_count)
+    # матрица с границами: +2 по строкам и столбцам
+    led_matrix = [[COLOR_BLACK]*(COLS+2) for _ in range(ROWS+2)]
+    prev_matrix = [row[:] for row in led_matrix]
 
     try:
-        while not stop_event.is_set():
-            game1.update()
-            if game2 is None and game1.locked_pieces_count >= 10:
-                print("🚀 Запуск второй игры после 10 упавших фигур!")
-                game2 = TetrisGame(HALF_COLS, HALF_COLS)
-            if game2:
-                game2.update()
+        while True:
+            game.update()
+
+            # очистка матрицы перед рендером
             for r in range(ROWS+2):
                 for c in range(COLS+2):
                     led_matrix[r][c] = COLOR_BLACK
-            game1.render(led_matrix)
-            if game2:
-                game2.render(led_matrix)
+
+            # отрисовка только своего игрового поля
+            game.render(led_matrix)
+
+            # собираем отличия от prev_matrix
             changed = []
             for r in range(1, ROWS+1):
                 for c in range(1, COLS+1):
                     if led_matrix[r][c] != prev_matrix[r][c]:
+                        # поворот координат под вашу штору
                         rotated_row = c
                         rotated_col = ROWS - r + 1
                         changed.append((rotated_row, rotated_col, led_matrix[r][c]))
             prev_matrix = [row[:] for row in led_matrix]
+
+            # отправляем пакеты, если что-то изменилось
             if changed:
-                commands = build_command_from_pixels(changed)
-                await send_commands(client, commands)
+                cmds = build_command_from_pixels(changed)
+                await send_commands(client, cmds)
+
             await asyncio.sleep(1 / FPS)
+
     except asyncio.CancelledError:
-        print("Игра остановлена")
+        # при отмене просто выходим из функции
+        return
+
+
 # -----------------------
 
 
 # Обработчик HTTP-запроса
 async def handle_mode(request):
-    global game_task
+    """
+    HTTP API:
+      /mode?cmd=Тетрис — запускает две параллельные игры Тетрис (левая и правая половины)
+      /mode?cmd=Стоп    — останавливает все запущенные игры
+      /mode?cmd=<цвет>  — глобально отправляет BLE‑команду (после остановки игр)
+    """
     cmd = request.rel_url.query.get("cmd")
     if cmd is None:
         return web.Response(text="Параметр cmd обязателен", status=400)
@@ -358,40 +371,57 @@ async def handle_mode(request):
 
     client = request.app['ble_client']
 
-    # Обработка команды
+    # --- 1) Запуск игр Тетрис ---
     if cmd == "Тетрис":
-     if game_task is None or game_task.done():
+        # если уже есть активные таски — отказываем
+        if any(not t.done() for t in game_tasks):
+            return web.Response(text="Игра уже запущена")
+
+        # готовим LED‑штору
         if not client.is_connected:
             await client.connect()
             await client.get_services()
-        print("⏳ Переход в режим индивидуального управления диодами...")
         await enter_per_led_mode(client)
-        game_task = asyncio.create_task(game_loop(client))
-        return web.Response(text="Игра Тетрис запущена")
-     else:
-        return web.Response(text="Игра уже запущена")
+
+        # создаём две параллельные игры: левая и правая половины
+        task1 = asyncio.create_task(single_game_loop(client, 0, HALF_COLS))
+        task2 = asyncio.create_task(single_game_loop(client, HALF_COLS, HALF_COLS))
+        game_tasks.clear()
+        game_tasks.extend([task1, task2])
+
+        return web.Response(text="Две игры Тетрис запущены")
+
+    # --- 2) Остановка всех игр ---
     elif cmd == "Стоп":
-        if game_task and not game_task.done():
-            game_task.cancel()
-            try:
-                await game_task
-            except asyncio.CancelledError:
-                pass
-            game_task = None
-            return web.Response(text="Игра остановлена")
-        else:
+        if not any(not t.done() for t in game_tasks):
             return web.Response(text="Игра не запущена")
+
+        # отменяем и ждём завершения
+        for t in game_tasks:
+            t.cancel()
+        await asyncio.gather(*game_tasks, return_exceptions=True)
+        game_tasks.clear()
+
+        return web.Response(text="Все игры остановлены")
+
+    # --- 3) Глобальные цветовые команды ---
     elif cmd in CMD_MAP:
-        print("⏳ Переход в режим глобального управления диодами...")
-        if game_task and not game_task.done():
-            game_task.cancel()
-            try:
-                await game_task
-            except asyncio.CancelledError:
-                pass
-            game_task = None
+        # сначала убираем любые играющие таски
+        if any(not t.done() for t in game_tasks):
+            for t in game_tasks:
+                t.cancel()
+            await asyncio.gather(*game_tasks, return_exceptions=True)
+            game_tasks.clear()
+
+        # шлём команду на всю штору
+        if not client.is_connected:
+            await client.connect()
+            await client.get_services()
         await send_control_command(client, CMD_MAP[cmd])
+
         return web.Response(text=f"Команда {cmd} отправлена")
+
+    # --- 4) Неизвестный запрос ---
     else:
         return web.Response(text=f"Неизвестная команда: {cmd}", status=400)
 
@@ -412,15 +442,29 @@ async def start_app(client):
     await site.start()
     print("🚀 HTTP сервер запущен на http://0.0.0.0:8080")
 
+async def shutdown(loop, client):
+    # отменяем все таски игр
+    for t in game_tasks:
+        t.cancel()
+    # ждём их завершения
+    await asyncio.gather(*game_tasks, return_exceptions=True)
+    # чисто отключаем BLE
+    if client.is_connected:
+        await client.disconnect()
+    loop.stop()
+
 async def main():
+    loop = asyncio.get_running_loop()
+    # ловим SIGTERM
+    loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown(loop, client)))
+
     async with BleakClient(DEVICE_ADDRESS) as client:
         if not client.is_connected:
-            print("❌ Не удалось подключиться к BLE устройству.")
+            print("❌ Не удалось подключиться к BLE.")
             return
         print("✅ Подключено к BLE.")
-        await enter_per_led_mode(client)
         await start_app(client)
-        await asyncio.Event().wait()  # Ждем вечности, пока не убьют процесс
+        await asyncio.Event().wait()
 
 if __name__ == '__main__':
     asyncio.run(main())
