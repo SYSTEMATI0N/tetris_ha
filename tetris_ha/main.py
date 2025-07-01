@@ -146,9 +146,12 @@ TETROMINOS = {
 
 
 class TetrisGame:
-    def __init__(self, cols_start, cols_count):
+    def __init__(self, cols_start, cols_count, seed=None):
         self.cols_start = cols_start
         self.cols_count = cols_count
+        import time
+        self.rng = random.Random(base)
+        base = seed if seed is not None else cols_start + int(time.time()*1000)
         self.field = [[False]*cols_count for _ in range(ROWS)]
         self.color_field = [[COLOR_BLACK for _ in range(cols_count)] for _ in range(ROWS)]
         self.piece_blocks = []
@@ -234,7 +237,7 @@ class TetrisGame:
         if best:
             self.piece_blocks, self.piece_col = best
         else:
-            self.piece_blocks = random.choice(list(TETROMINOS.values()))
+            self.piece_blocks = self.rng.choice(list(TETROMINOS.values()))
             self.piece_col = start_col
         self.piece_row = -2
         self.piece_color = random.choice(COLOR_PALETTE)
@@ -307,7 +310,7 @@ class TetrisGame:
             if 0 <= nr < ROWS+2 and 0 <= nc < COLS+2:
                 led_matrix[nr][nc] = self.piece_color
 # -----------------------
-async def single_game_loop(client, cols_start, cols_count):
+async def single_game_loop(client, cols_start, cols_count, seed=None):
     """
     Один цикл игры Тетрис на диапазоне колонок [cols_start, cols_start+cols_count).
     Рендерит и отправляет только своё поле.
@@ -384,8 +387,8 @@ async def handle_mode(request):
         await enter_per_led_mode(client)
 
         # создаём две параллельные игры: левая и правая половины
-        task1 = asyncio.create_task(single_game_loop(client, 0, HALF_COLS))
-        task2 = asyncio.create_task(single_game_loop(client, HALF_COLS, HALF_COLS))
+        task1 = asyncio.create_task(single_game_loop(client, 0, HALF_COLS, seed=1))
+        task2 = asyncio.create_task(single_game_loop(client, HALF_COLS, HALF_COLS, seed=2))
         game_tasks.clear()
         game_tasks.extend([task1, task2])
 
