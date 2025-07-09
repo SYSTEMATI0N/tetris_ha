@@ -418,8 +418,8 @@ async def handle_mode(request):
             await enter_per_led_mode(ble_manager)
         except Exception as e:
             return web.Response(status=500, text=f"Ошибка BLE при инициализации: {e}")
-        task1 = asyncio.create_task(single_game_loop(ble_manager, 0, HALF_COLS, seed=1))
-        task2 = asyncio.create_task(single_game_loop(ble_manager, HALF_COLS, HALF_COLS, seed=2))
+        task1 = asyncio.create_task(single_game_loop(ble_manager, 0, HALF_COLS))
+        task2 = asyncio.create_task(single_game_loop(ble_manager, HALF_COLS, HALF_COLS))
         game_tasks.clear()
         game_tasks.extend([task1, task2])
         return web.Response(text="Две игры Тетрис запущены")
